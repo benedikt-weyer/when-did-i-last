@@ -3,23 +3,35 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import HomeScreen from './src/HomeScreen';
 import { Text } from 'react-native';
+import CardEditScreen from './src/CardEditScreen';
 
-const Stack = createNativeStackNavigator();
+export type RootStackParams = {
+	Home: any;
+	CardEdit: any;
+};
+
+const RootStack = createNativeStackNavigator<RootStackParams>();
 
 export default function App() {
     return (
 		<NavigationContainer>
-			<Stack.Navigator screenOptions={{
-				
+			<RootStack.Navigator screenOptions={{
+				animation: 'default'
 			}}>
-				<Stack.Screen name="Home" component={HomeScreen} options={{
-					//header: () => {return <Text className='text-4xl text-[#515554]'>When did I last</Text>;},
+				<RootStack.Screen name="Home" component={HomeScreen} options={{
 					title: 'When did I last',
 					headerStyle: { backgroundColor: '#F5EFB9' },
 					headerTintColor: '#111',
 					headerShadowVisible: false,
 				}} />
-			</Stack.Navigator>
+
+				<RootStack.Screen name="CardEdit" component={CardEditScreen} options={{
+					title: 'Edit Card',
+					headerStyle: { backgroundColor: '#F5EFB9' },
+					headerTintColor: '#111',
+					headerShadowVisible: false,
+				}} />
+			</RootStack.Navigator>
 		</NavigationContainer>
     );
 }

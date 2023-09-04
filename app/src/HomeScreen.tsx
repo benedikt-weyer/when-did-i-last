@@ -1,14 +1,30 @@
 import { StatusBar } from 'expo-status-bar';
-import { Text, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
+import WDILCard from './WDILCard';
 
 const HomeScreen = () => {
     return (
-		<View className="flex-1 justify-start bg-[#F5EFB9] p-5">
+		<View className="flex-1 justify-start bg-[#F5EFB9] py-3 px-2">
             <StatusBar style="auto" />
 
-			<View className='bg-white p-3 rounded-md'>
-                <Text className='text-[#111]'>Open up App.tsx to start working on the app?</Text>
-            </View>
+            <ScrollView>
+                <WDILCard question='clean the kitchen' timeSinceEvent='4 days' />
+
+                <WDILCard question='sweap the bathroom floor' timeSinceEvent='2 days' />
+
+                <WDILCard question='shower' timeSinceEvent='1 day' />
+
+                <WDILCard question='give birth to 10 childs including a neat looking squirrel' timeSinceEvent='2 days' />
+
+                <WDILCard question='clean the kitchen' timeSinceEvent='4 days' />
+
+                <WDILCard question='sweap the bathroom floor' timeSinceEvent='2 days' />
+
+                <WDILCard question='clean the kitchen' timeSinceEvent='4 days' />
+
+                <WDILCard question='sweap the bathroom floor' timeSinceEvent='2 days' />
+            </ScrollView>
+			
 			
 			
 		</View>
