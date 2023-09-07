@@ -41,13 +41,14 @@ const HomeScreen = () => {
             //const now = new Date();
             let lastDoneDateString = 'never';
             if(card.lastDoneDate){
-                const timeDelta = now.getTime() - card.lastDoneDate;
+                const timeDelta = Math.max(now.getTime() - card.lastDoneDate, 0);
                 const timeDeltaInDays = Math.floor(timeDelta / 1000 / 60 / 60 / 24);
                 const timeDeltaInHours = Math.floor(timeDelta / 1000 / 60 / 60);
                 const timeDeltaInMinutes = Math.floor(timeDelta / 1000 / 60);
                 const timeDeltaInSecounds = Math.floor(timeDelta / 1000);
 
                 lastDoneDateString = '';
+                console.log(timeDelta)
                 //lastDoneDateString += `${timeDeltaInSecounds % 60} second${timeDeltaInSecounds % 60 != 1 ? 's' : ''} and `;
                 //lastDoneDateString += `${timeDeltaInMinutes % 60}m `;
                 lastDoneDateString += `${timeDeltaInHours % 24} hour${timeDeltaInHours % 24 != 1 ? 's' : ''} and `;
