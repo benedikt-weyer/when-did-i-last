@@ -9,6 +9,7 @@ import * as Linking from 'expo-linking';
 
 import Icon from 'react-native-vector-icons/Feather';
 import CardCreationScreen from './src/CardCreationScreen';
+import SettingsScreen from './src/SettingsScreen';
 
 export type RootStackParams = {
 	Home: any;
@@ -16,6 +17,7 @@ export type RootStackParams = {
 		id: number,
 	};
 	CardCreation: any;
+	Settings: any;
 };
 
 const RootStack = createNativeStackNavigator<RootStackParams>();
@@ -35,7 +37,11 @@ export default function App() {
 					headerRight: () =>  {
 						const navigation = useNavigation<NativeStackNavigationProp<RootStackParams>>();
 						return(
-							<View className='flex flex-row gap-10 mx-2'>
+							<View className='flex flex-row gap-7 mx-2'>
+								<Pressable onPress={() => navigation.navigate('Settings')}>
+									<Icon name={'settings'} size={25} />
+								</Pressable>
+
 								<Pressable onPress={() => Linking.openURL('https://www.buymeacoffee.com/benediktw')}>
 									<Icon name={'coffee'} size={25} />
 								</Pressable>
@@ -57,6 +63,13 @@ export default function App() {
 
 				<RootStack.Screen name="CardCreation" component={CardCreationScreen} options={{
 					title: 'Create Card',
+					headerStyle: { backgroundColor: '#F5EFB9' },
+					headerTintColor: '#111',
+					headerShadowVisible: false,
+				}} />
+
+				<RootStack.Screen name="Settings" component={SettingsScreen} options={{
+					title: 'Settings',
 					headerStyle: { backgroundColor: '#F5EFB9' },
 					headerTintColor: '#111',
 					headerShadowVisible: false,

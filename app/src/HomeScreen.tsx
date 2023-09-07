@@ -35,7 +35,7 @@ const HomeScreen = () => {
 
     const renderWDILCards = () => {
 
-        const outWDILCardsJSX : Array<React.JSX> = [];
+        const outWDILCardsJSX : Array<React.JSX.Element> = [];
 
         cards.forEach(card => {
             //const now = new Date();
