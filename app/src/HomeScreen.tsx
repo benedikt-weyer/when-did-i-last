@@ -38,7 +38,7 @@ const HomeScreen = () => {
         const outWDILCardsJSX : Array<React.JSX.Element> = [];
 
         cards.forEach(card => {
-            //const now = new Date();
+
             let lastDoneDateString = 'never';
             if(card.lastDoneDate){
                 const timeDelta = Math.max(now.getTime() - card.lastDoneDate, 0);
@@ -48,7 +48,6 @@ const HomeScreen = () => {
                 const timeDeltaInSecounds = Math.floor(timeDelta / 1000);
 
                 lastDoneDateString = '';
-                console.log(timeDelta)
                 //lastDoneDateString += `${timeDeltaInSecounds % 60} second${timeDeltaInSecounds % 60 != 1 ? 's' : ''} and `;
                 //lastDoneDateString += `${timeDeltaInMinutes % 60}m `;
                 lastDoneDateString += `${timeDeltaInHours % 24} hour${timeDeltaInHours % 24 != 1 ? 's' : ''} and `;

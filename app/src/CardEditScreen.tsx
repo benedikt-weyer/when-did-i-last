@@ -27,7 +27,7 @@ const CardEditScreen = ({ route, navigation } : Props) => {
 
         const thisCard = cardsCurrentState.find(card => card.id === route.params.id);
         if(thisCard){
-            thisCard.question = questionTextInput;
+            thisCard.question = questionTextInput.trim();
         }
 
         //update storage

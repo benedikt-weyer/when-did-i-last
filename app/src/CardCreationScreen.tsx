@@ -23,7 +23,7 @@ const CardCreationScreen = () => {
 
         cardsCurrentState.push({
             id: newId,
-            question: questionTextInput
+            question: questionTextInput.trim()
         });
 
         //update storage
