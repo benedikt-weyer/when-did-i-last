@@ -1,6 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { ScrollView, Text, View, Pressable, TextInput } from 'react-native';
 import WDILCard from './WDILCard';
+import { localStorage } from './LocalStorage';
 
 const CardEditScreen = () => {
     return (
@@ -13,6 +14,7 @@ const CardEditScreen = () => {
                     className='bg-white rounded-md p-3'
                     multiline={true}
                     numberOfLines={1}
+                    value={localStorage.getString('question1')}
                 />
 
                 <Pressable className='bg-[#82c056] rounded-md mt-4'>
