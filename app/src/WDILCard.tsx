@@ -30,12 +30,12 @@ const WDILCard = ({ id, question = 'passed a value to this prop', timeSinceEvent
 
     return (
         <Pressable className='bg-white p-3 rounded-md m-2 flex-1 flex-row justify-between' onPress={() => navigation.navigate('CardEdit', {id: id})}>
-            <View className='flex w-[75%]'>
+            <View className='flex shrink grow'>
                 <Text className='text-[#111]'>{question}?</Text>
-                <View className='bg-gray-200 h-[1px] my-4' />
+                <View className='bg-gray-200 h-[1px] my-3' />
                 <Text className='text-[#111] font-bold '>{timeSinceEvent}</Text>
             </View>
-            <View className='flex w-[20%] items-center justify-center'>
+            <View className='flex items-center justify-center ml-4'>
                 <Pressable className='bg-gray-100 rounded-md' onPress={handleNowPress}>
                     <Text className='font-bold p-3'>Now</Text>
                 </Pressable>

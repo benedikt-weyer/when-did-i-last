@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { CardType } from './types/CardType';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParams } from '../App';
+import Icon from 'react-native-vector-icons/Feather';
 
 type Props = NativeStackScreenProps<RootStackParams, 'CardEdit'>
 
@@ -52,26 +53,37 @@ const CardEditScreen = ({ route, navigation } : Props) => {
     }
 
     return (
-		<View className="flex-1 justify-start bg-[#F5EFB9] py-3 px-2">
+		<View className="flex-1 justify-start bg-[#F5EFB9] py-0 px-3">
             <StatusBar style="auto" />
 
-            <ScrollView>
-                <Text className='text-gray-950 py-3 text-lg'>When did I last...</Text>
-                <TextInput
-                    className='bg-white rounded-md p-3'
-                    multiline={true}
-                    numberOfLines={1}
-                    value={questionTextInput}
-                    onChangeText={ (text) => setQuestionTextInput(text) }
-                />
-
-                <Pressable className='bg-[#82c056] rounded-md mt-4' onPress={handleSavePress}>
-                    <Text className='text-white text-center py-3 text-lg'>Save</Text>
-                </Pressable>
+            <ScrollView className='w-full'>
+                <Text className='text-gray-950 py-3 text-lg font-medium'>When did I last...</Text>
                 
-                <Pressable className='border-2 border- border-red-500 rounded-md mt-4' onPress={handleDeletePress}>
-                    <Text className='text-red-500 text-center py-3 text-lg'>Delete</Text>
-                </Pressable>
+                <View className='flex flex-row items-center bg-white rounded-md'>
+                    <TextInput
+                        className='bg-white h-full rounded-l-md px-3 py-2 text-base shrink grow'
+                        multiline={true}
+                        numberOfLines={1}
+                        autoCapitalize='none'
+                        onChangeText={(text) => setQuestionTextInput(text)}
+                        value={questionTextInput}
+                    />
+                    <View className='flex flex-row items-center bg-gray-50 rounded-r-md px-3 h-full'>
+                        <Text className='text-lg font-medium'>?</Text>
+                    </View>
+                </View>
+
+                <View className='flex flex-row justify-between'>
+                    <Pressable className='rounded-md mt-4 flex flex-row items-center justify-left px-4 h-10 bg-[#f54848]' onPress={handleDeletePress}>
+                        <Icon name='trash' size={20} color={'#fff'} />
+                        
+                    </Pressable>
+
+                    <Pressable className='bg-[#000000] rounded-md mt-4 flex flex-row items-center justify-center px-4 h-10 grow ml-4' onTouchStart={handleSavePress}>
+                        <Icon name='save' size={20} color={'white'} />
+                        <Text className='text-white text-center text-lg font-medium ml-3'>Save</Text>
+                    </Pressable>
+                </View>
                 
             </ScrollView>
 			
