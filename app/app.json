@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "when-did-i-last",
+    "name": "When Did I Last",
     "slug": "when-did-i-last",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/when-did-I-last-logo-bg-s.png",
     "userInterfaceStyle": "light",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/when-did-I-last-splash-top.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#F5EFB9"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -18,14 +18,8 @@
       "supportsTablet": true
     },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      },
+      
       "package": "com.benedikt.weyer.whendidilast"
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
     }
   }
 }
