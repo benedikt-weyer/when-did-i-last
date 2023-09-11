@@ -18,8 +18,12 @@
       "supportsTablet": true
     },
     "android": {
-      
       "package": "com.benedikt.weyer.whendidilast"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "015f24a3-6f10-4cd6-9d54-2578719886f7"
+      }
     }
   }
 }
