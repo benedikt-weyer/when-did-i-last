@@ -1,3 +1,8 @@
+layout: page
+title: "Privacy Policy"
+permalink: /privacy-policy
+---
+
 **Privacy Policy**
 
 Benedikt Weyer built the When Did I Last app as an Open Source app. This SERVICE is provided by Benedikt Weyer at no cost and is intended for use as is.
