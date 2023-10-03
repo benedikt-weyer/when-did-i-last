@@ -11,6 +11,9 @@ import Icon from 'react-native-vector-icons/Feather';
 import CardCreationScreen from './src/CardCreationScreen';
 import SettingsScreen from './src/SettingsScreen';
 
+import Modal from "react-native-modal";
+import { useState } from 'react';
+
 export type RootStackParams = {
 	Home: any;
 	CardEdit: {
@@ -23,6 +26,11 @@ export type RootStackParams = {
 const RootStack = createNativeStackNavigator<RootStackParams>();
 
 export default function App() {
+	const [isModalVisible, setModalVisible] = useState(false);
+
+	const toggleModal = () => {
+		setModalVisible(!isModalVisible);
+	};
 
     return (
 		<NavigationContainer>
@@ -42,9 +50,35 @@ export default function App() {
 									<Icon name={'settings'} size={25} />
 								</Pressable>
 
-								<Pressable onPress={() => Linking.openURL('https://www.buymeacoffee.com/benediktw')}>
+								<Pressable onPress={() => setModalVisible(!isModalVisible) }>
 									<Icon name={'coffee'} size={25} />
 								</Pressable>
+
+								<Modal isVisible={isModalVisible} onBackdropPress={() => setModalVisible(false)}>
+									<View className='flex bg-white rounded-md p-4'>
+										<View className='flex flex-row justify-between items-center bg-white rounded-md'>
+											<Text className='text-lg font-bold'>Support the project</Text>
+											<Pressable className='flex flex-row bg-gray-100 rounded-md  p-2 self-end' onPress={() => setModalVisible(false)}>
+												<Icon name={'x'} size={20} />
+											</Pressable>
+										</View>
+										
+										<View className='flex p-1 py-2'>
+											<Text className='text-lg'>This is an open source app with no ads nor tracking nor any paid-plans.</Text>
+											<Text className='text-lg'>If you like the App and want to support the developer, please consider buying me a coffee</Text>
+
+											<Text className='text-5xl my-8 font-bold text-center'>☕</Text>
+
+											<Pressable className='flex flex-row bg-[#F5EFB9] rounded-md items-center justify-between p-3 my-5' onPress={() => Linking.openURL('https://www.buymeacoffee.com/benediktw')}>
+												
+												<Text className='text-lg font-bold'>Buy me a Coffee</Text>
+												<Icon name={'external-link'} size={25} />
+											</Pressable>
+
+											<Text className='text-lg'>Thank you 😋!</Text>
+										</View>
+									</View>
+								</Modal>
 								
 								<Pressable onPress={() => navigation.navigate('CardCreation')}>
 									<Icon name={'plus'} size={25} />

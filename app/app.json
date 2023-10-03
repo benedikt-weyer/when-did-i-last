@@ -2,7 +2,7 @@
   "expo": {
     "name": "When Did I Last",
     "slug": "when-did-i-last",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/when-did-I-last-logo-bg-s.png",
     "userInterfaceStyle": "light",
