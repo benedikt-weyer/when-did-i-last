@@ -1,0 +1,1 @@
+export { AccountSettingsScreen as default } from '../src/screens/account-settings-screen';

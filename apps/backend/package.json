@@ -1,0 +1,13 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "cargo-watch -x run",
+    "build": "cargo build",
+    "check": "cargo check",
+    "test": "cargo test",
+    "lint": "cargo clippy",
+    "format": "cargo fmt"
+  }
+}

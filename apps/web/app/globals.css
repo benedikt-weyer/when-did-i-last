@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 45 67% 97%;
+    --foreground: 164 37% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 164 37% 12%;
+    --primary: 166 55% 22%;
+    --primary-foreground: 40 67% 97%;
+    --secondary: 31 73% 85%;
+    --secondary-foreground: 164 37% 12%;
+    --muted: 48 54% 92%;
+    --muted-foreground: 164 16% 36%;
+    --accent: 151 42% 88%;
+    --accent-foreground: 164 37% 12%;
+    --border: 154 22% 80%;
+    --input: 154 22% 80%;
+    --ring: 166 55% 22%;
+    --radius: 1.25rem;
+    color-scheme: light;
+  }
+
+  .dark {
+    --background: 158 28% 9%;
+    --foreground: 45 38% 94%;
+    --card: 160 24% 13%;
+    --card-foreground: 45 38% 94%;
+    --primary: 151 45% 64%;
+    --primary-foreground: 160 31% 12%;
+    --secondary: 160 16% 18%;
+    --secondary-foreground: 45 38% 94%;
+    --muted: 158 14% 16%;
+    --muted-foreground: 45 15% 72%;
+    --accent: 151 22% 20%;
+    --accent-foreground: 45 38% 94%;
+    --border: 158 12% 26%;
+    --input: 158 12% 26%;
+    --ring: 151 45% 64%;
+    color-scheme: dark;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased transition-colors duration-300;
+    background-image:
+      radial-gradient(circle at top left, rgba(246, 187, 66, 0.24), transparent 28%),
+      radial-gradient(circle at right 18%, rgba(84, 172, 138, 0.22), transparent 22%),
+      linear-gradient(180deg, #fffef8 0%, #f8f4e8 48%, #f3efe4 100%);
+    min-height: 100vh;
+  }
+
+  .dark body {
+    background-image:
+      radial-gradient(circle at top left, rgba(239, 180, 74, 0.12), transparent 28%),
+      radial-gradient(circle at right 18%, rgba(88, 180, 146, 0.14), transparent 20%),
+      linear-gradient(180deg, #0f1815 0%, #121d19 48%, #0d1412 100%);
+  }
+
+  ::selection {
+    background: rgba(34, 104, 79, 0.18);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}

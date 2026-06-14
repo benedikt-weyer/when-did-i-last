@@ -1,0 +1,35 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "ANDROID_HOME",
+    "ANDROID_SDK_ROOT",
+    "ANDROID_NDK_ROOT",
+    "JAVA_HOME",
+    "GRADLE_OPTS"
+  ],
+  "tasks": {
+    "build": {
+      "outputs": ["site/**", ".next/**", "!.next/cache/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "interactive": true
+    },
+    "typecheck": {
+      "outputs": []
+    },
+    "lint": {
+      "outputs": []
+    },
+    "test": {
+      "outputs": []
+    },
+    "check": {
+      "outputs": []
+    },
+    "format": {
+      "outputs": []
+    }
+  }
+}

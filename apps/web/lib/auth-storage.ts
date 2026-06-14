@@ -1,0 +1,365 @@
+import type { CryptKey } from '@repo/e2ee-auth/web';
+
+import type { AuthApiResponse } from '@/lib/auth-api';
+
+const AUTH_PREFERENCES_STORAGE_KEY = 'auth-preferences';
+export const AUTH_STORAGE_SYNC_EVENT = 'preset:auth-storage-sync';
+
+export type AuthPreferences = {
+  backendUrl: string;
+  lastEmail: string;
+};
+
+export type PersistedDerivedCredentials = {
+  email: string;
+  linkedKeks: PersistedLinkedKek[];
+};
+
+export type PersistedLinkedKek = {
+  cryptKey: CryptKey;
+  kekEpochVersion: number;
+  kekPublicKey: string;
+  saltHex: string;
+};
+
+type StoredLinkedKek = {
+  cryptKeyHex?: string;
+  kekEpochVersion?: number;
+  kekPublicKey?: string;
+  saltHex?: string;
+};
+
+type StoredDerivedCredentials = {
+  email?: string;
+  linkedKeks?: StoredLinkedKek[];
+};
+
+type StoredAuthPreferences = {
+  backendUrl?: string;
+  lastEmail?: string;
+  authSession?: AuthApiResponse;
+  derivedCredentials?: StoredDerivedCredentials;
+};
+
+export interface AuthPersistenceAdapter {
+  clearAuthSession: () => void;
+  clearDerivedCredentials: () => void;
+  readAuthSession: () => AuthApiResponse | null;
+  readDerivedCredentials: () => PersistedDerivedCredentials | null;
+  readPreferences: () => AuthPreferences;
+  writeAuthSession: (session: AuthApiResponse) => void;
+  writeDerivedCredentials: (credentials: PersistedDerivedCredentials) => void;
+  writePreferences: (preferences: AuthPreferences) => void;
+}
+
+declare global {
+  interface Window {
+    __RUNTIME_CONFIG__?: {
+      backendUrl?: string;
+    };
+  }
+}
+
+function readDefaultPreferences(): AuthPreferences {
+  return {
+    backendUrl: readRuntimeBackendUrl(),
+    lastEmail: '',
+  };
+}
+
+function hasWindow() {
+  return globalThis.window !== undefined;
+}
+
+function readStoredPreferences(): StoredAuthPreferences | null {
+  if (!hasWindow()) {
+    return null;
+  }
+
+  try {
+    const storedPreferences = globalThis.window.localStorage.getItem(
+      AUTH_PREFERENCES_STORAGE_KEY,
+    );
+
+    if (!storedPreferences) {
+      return null;
+    }
+
+    const parsedPreferences = JSON.parse(storedPreferences) as unknown;
+
+    return typeof parsedPreferences === 'object' && parsedPreferences !== null
+      ? parsedPreferences
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readRuntimeBackendUrl() {
+  if (!hasWindow()) {
+    return '';
+  }
+
+  return globalThis.window.__RUNTIME_CONFIG__?.backendUrl?.trim() ?? '';
+}
+
+function writeStoredPreferences(preferences: StoredAuthPreferences) {
+  if (!hasWindow()) {
+    return;
+  }
+
+  try {
+    globalThis.window.localStorage.setItem(
+      AUTH_PREFERENCES_STORAGE_KEY,
+      JSON.stringify(preferences),
+    );
+  } catch {
+    // Keep auth usable even when local storage is unavailable.
+  }
+
+  globalThis.window.dispatchEvent(new Event(AUTH_STORAGE_SYNC_EVENT));
+}
+
+function bytesToHex(bytes: Uint8Array) {
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBytes(hex: string) {
+  const normalizedHex = hex.trim().toLowerCase();
+
+  if (!normalizedHex || normalizedHex.length % 2 !== 0 || /[^0-9a-f]/.test(normalizedHex)) {
+    return null;
+  }
+
+  const bytes = new Uint8Array(normalizedHex.length / 2);
+
+  for (let index = 0; index < normalizedHex.length; index += 2) {
+    const nextByte = Number.parseInt(normalizedHex.slice(index, index + 2), 16);
+
+    if (Number.isNaN(nextByte)) {
+      return null;
+    }
+
+    bytes[index / 2] = nextByte;
+  }
+
+  return bytes;
+}
+
+export const localStorageAuthPersistence: AuthPersistenceAdapter = {
+  clearAuthSession() {
+    const storedPreferences = readStoredPreferences();
+
+    if (!storedPreferences?.authSession) {
+      return;
+    }
+
+    const nextPreferences = { ...storedPreferences };
+
+    delete nextPreferences.authSession;
+
+    writeStoredPreferences(nextPreferences);
+  },
+  clearDerivedCredentials() {
+    const storedPreferences = readStoredPreferences();
+
+    if (!storedPreferences?.derivedCredentials) {
+      return;
+    }
+
+    const nextPreferences = { ...storedPreferences };
+
+    delete nextPreferences.derivedCredentials;
+
+    writeStoredPreferences(nextPreferences);
+  },
+  readAuthSession() {
+    const storedPreferences = readStoredPreferences();
+    const authSession = storedPreferences?.authSession;
+
+    if (
+      !authSession ||
+      !authSession.currentPrincipal ||
+      typeof authSession.token !== 'string' ||
+      typeof authSession.refreshToken !== 'string' ||
+      !Array.isArray(authSession.kekMetadatas) ||
+      !Array.isArray(authSession.linkedPrincipals) ||
+      !authSession.user ||
+      typeof authSession.user.id !== 'string' ||
+      typeof authSession.user.email !== 'string' ||
+      typeof authSession.currentPrincipal.id !== 'string' ||
+      typeof authSession.currentPrincipal.kind !== 'string' ||
+      authSession.kekMetadatas.some(
+        (metadata) =>
+          !metadata ||
+          typeof metadata !== 'object' ||
+          typeof metadata.kekPublicKey !== 'string' ||
+          typeof metadata.kekEpochVersion !== 'number',
+      ) ||
+      authSession.linkedPrincipals.some(
+        (principal) =>
+          !principal ||
+          typeof principal !== 'object' ||
+          typeof principal.id !== 'string' ||
+          typeof principal.kind !== 'string' ||
+          typeof principal.latestKekPublicKey !== 'string' ||
+          typeof principal.latestKekEpochVersion !== 'number'
+      )
+    ) {
+      return null;
+    }
+
+    return {
+      currentPrincipal: {
+        email: authSession.currentPrincipal.email?.trim().toLowerCase() ?? null,
+        id: authSession.currentPrincipal.id,
+        kind: authSession.currentPrincipal.kind,
+        username: authSession.currentPrincipal.username?.trim().toLowerCase() ?? null,
+      },
+      kekMetadatas: authSession.kekMetadatas
+        .map((metadata) => ({
+          kekEpochVersion: metadata.kekEpochVersion,
+          kekPublicKey: metadata.kekPublicKey.trim(),
+        }))
+        .filter((metadata) => metadata.kekPublicKey),
+      linkedPrincipals: authSession.linkedPrincipals.map((principal) => ({
+        email: principal.email?.trim().toLowerCase() ?? null,
+        id: principal.id,
+        kind: principal.kind,
+        latestKekEpochVersion: principal.latestKekEpochVersion,
+        latestKekPublicKey: principal.latestKekPublicKey.trim(),
+        username: principal.username?.trim().toLowerCase() ?? null,
+      })),
+      refreshToken: authSession.refreshToken,
+      token: authSession.token,
+      user: {
+        email: authSession.user.email.trim().toLowerCase(),
+        id: authSession.user.id,
+      },
+    };
+  },
+  readDerivedCredentials() {
+    const storedPreferences = readStoredPreferences();
+    const email = storedPreferences?.derivedCredentials?.email?.trim().toLowerCase();
+    const linkedKeks = storedPreferences?.derivedCredentials?.linkedKeks;
+
+    if (!email || !Array.isArray(linkedKeks)) {
+      return null;
+    }
+
+    const normalizedLinkedKeks: PersistedLinkedKek[] = [];
+
+    for (const linkedKek of linkedKeks) {
+        const cryptKey = hexToBytes(linkedKek?.cryptKeyHex ?? '');
+        const kekPublicKey = linkedKek?.kekPublicKey?.trim();
+        const saltHex = linkedKek?.saltHex?.trim().toLowerCase();
+        const kekEpochVersion = linkedKek?.kekEpochVersion;
+
+        if (
+          !cryptKey ||
+          !kekPublicKey ||
+          !saltHex ||
+          typeof kekEpochVersion !== 'number' ||
+          !Number.isInteger(kekEpochVersion)
+        ) {
+          continue;
+        }
+
+        normalizedLinkedKeks.push({
+          cryptKey,
+          kekEpochVersion,
+          kekPublicKey,
+          saltHex,
+        });
+      }
+
+    if (normalizedLinkedKeks.length === 0) {
+      return null;
+    }
+
+    return {
+      email,
+      linkedKeks: normalizedLinkedKeks,
+    };
+  },
+  readPreferences() {
+    const defaultPreferences = readDefaultPreferences();
+    const storedPreferences = readStoredPreferences();
+
+    return {
+      backendUrl: storedPreferences?.backendUrl?.trim() || defaultPreferences.backendUrl,
+      lastEmail:
+        storedPreferences?.lastEmail ??
+        storedPreferences?.derivedCredentials?.email?.trim().toLowerCase() ??
+        '',
+    };
+  },
+  writeDerivedCredentials(credentials) {
+    const storedPreferences = readStoredPreferences() ?? {};
+
+    writeStoredPreferences({
+      ...storedPreferences,
+      derivedCredentials: {
+        email: credentials.email.trim().toLowerCase(),
+        linkedKeks: credentials.linkedKeks.map((linkedKek) => ({
+          cryptKeyHex: bytesToHex(linkedKek.cryptKey),
+          kekEpochVersion: linkedKek.kekEpochVersion,
+          kekPublicKey: linkedKek.kekPublicKey.trim(),
+          saltHex: linkedKek.saltHex.trim().toLowerCase(),
+        })),
+      },
+      lastEmail: credentials.email.trim().toLowerCase(),
+    });
+  },
+  writeAuthSession(session) {
+    const storedPreferences = readStoredPreferences() ?? {};
+
+    writeStoredPreferences({
+      ...storedPreferences,
+      authSession: {
+        currentPrincipal: {
+          email: session.currentPrincipal.email?.trim().toLowerCase() ?? null,
+          id: session.currentPrincipal.id,
+          kind: session.currentPrincipal.kind,
+          username: session.currentPrincipal.username?.trim().toLowerCase() ?? null,
+        },
+        kekMetadatas: session.kekMetadatas.map((metadata) => ({
+          kekEpochVersion: metadata.kekEpochVersion,
+          kekPublicKey: metadata.kekPublicKey.trim(),
+        })),
+        linkedPrincipals: session.linkedPrincipals.map((principal) => ({
+          email: principal.email?.trim().toLowerCase() ?? null,
+          id: principal.id,
+          kind: principal.kind,
+          latestKekEpochVersion: principal.latestKekEpochVersion,
+          latestKekPublicKey: principal.latestKekPublicKey.trim(),
+          username: principal.username?.trim().toLowerCase() ?? null,
+        })),
+        refreshToken: session.refreshToken,
+        token: session.token,
+        user: {
+          email: session.user.email.trim().toLowerCase(),
+          id: session.user.id,
+        },
+      },
+      lastEmail: session.user.email.trim().toLowerCase(),
+    });
+  },
+  writePreferences(preferences) {
+    const storedPreferences = readStoredPreferences() ?? {};
+
+    writeStoredPreferences({
+      ...storedPreferences,
+      backendUrl: preferences.backendUrl.trim(),
+      lastEmail: preferences.lastEmail.trim().toLowerCase(),
+    });
+  },
+};
+
+export function readAuthPreferences(): AuthPreferences {
+  return localStorageAuthPersistence.readPreferences();
+}
+
+export function writeAuthPreferences(preferences: AuthPreferences) {
+  localStorageAuthPersistence.writePreferences(preferences);
+}

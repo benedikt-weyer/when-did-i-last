@@ -1,0 +1,58 @@
+{
+  "name": "preset-reactnative-frontend-rust-backend-e2ee-github",
+  "private": true,
+  "packageManager": "pnpm@10.33.4",
+  "scripts": {
+    "dev": "pnpm db:restart && turbo dev --ui=tui",
+    "devstop": "pnpm db:down",
+    "dev:backend": "turbo -F backend dev --ui=tui",
+    "dev:docs": "turbo -F docs dev",
+    "dev:web": "turbo -F web dev --ui=tui",
+    "dev:mobile": "turbo -F mobile dev --ui=tui",
+
+    "setupenv": "node ./scripts/setupenv.mjs",
+
+    "build": "turbo build",
+    "build:docs": "turbo -F docs build",
+    "build:web": "turbo -F web build",
+    "build:web:docker": "docker build -t preset-web -f apps/web/Dockerfile .",
+    "build:mobile": "turbo -F mobile build",
+    "install:android": "./apps/mobile/android/gradlew -p ./apps/mobile/android :app:installRelease",
+    "build:backend": "turbo -F backend build",
+    "build:backend:docker": "docker build -t preset-backend -f apps/backend/Dockerfile apps/backend",
+
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:restart": "pnpm db:down && pnpm db:up",
+
+    "lint": "turbo lint",
+    "lint:backend": "turbo -F backend lint",
+    "lint:docs": "turbo -F docs lint",
+    "lint:web": "turbo -F web lint",
+    "lint:mobile": "turbo -F mobile lint",
+
+    "typecheck": "turbo typecheck",
+    "typecheck:backend": "turbo -F backend typecheck",
+    "typecheck:docs": "turbo -F docs typecheck",
+    "typecheck:web": "turbo -F web typecheck",
+    "typecheck:mobile": "turbo -F mobile typecheck",
+
+    "check": "turbo typecheck lint check test",
+
+    "format": "turbo format",
+    "format:backend": "turbo -F backend format",
+    "format:docs": "turbo -F docs format",
+    "format:web": "turbo -F web format",
+    "format:mobile": "turbo -F mobile format",
+
+    "test": "turbo test",
+    "test:integration": "turbo -F @repo/backend-integration-tests test",
+    "test:web": "turbo -F web test",
+    "test:backend": "turbo -F backend test",
+    "test:docs": "turbo -F docs test",
+    "test:mobile": "turbo -F mobile test"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4"
+  }
+}
