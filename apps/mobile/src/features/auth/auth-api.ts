@@ -101,7 +101,7 @@ export type EncryptedBlobPayload = {
 
 export type ApiUserProvisioningStatus = {
   completedResourceCount: number;
-  pendingNoteIds: string[];
+  pendingCardIds: string[];
   pendingResourceCount: number;
   totalResourceCount: number;
 };
@@ -532,12 +532,12 @@ function isApiUserProvisioningStatus(value: unknown): value is ApiUserProvisioni
   return !!value &&
     typeof value === 'object' &&
     'completedResourceCount' in value &&
-    'pendingNoteIds' in value &&
+    'pendingCardIds' in value &&
     'pendingResourceCount' in value &&
     'totalResourceCount' in value &&
     typeof value.completedResourceCount === 'number' &&
-    Array.isArray(value.pendingNoteIds) &&
-    value.pendingNoteIds.every((noteId) => typeof noteId === 'string') &&
+    Array.isArray(value.pendingCardIds) &&
+    value.pendingCardIds.every((cardId) => typeof cardId === 'string') &&
     typeof value.pendingResourceCount === 'number' &&
     typeof value.totalResourceCount === 'number';
 }

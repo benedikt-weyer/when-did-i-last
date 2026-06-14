@@ -35,7 +35,7 @@ export function AuthPageClient() {
         {sessionState.session ? (
           <div className="grid gap-4">
             <div className="rounded-[1.4rem] border border-border/60 bg-background/80 p-4 text-sm leading-6 text-foreground/75">
-              Session is active. Use the navbar to open notes or account settings.
+              Session is active. Use the navbar to open cards or account settings.
             </div>
             <StatusPanel statusMessage={sessionState.statusMessage} />
           </div>
@@ -47,9 +47,7 @@ export function AuthPageClient() {
             isSubmitting={sessionState.isSubmitting}
             mode={sessionState.mode}
             olderPasswords={sessionState.olderPasswords}
-            onSubmit={() => {
-              void sessionState.handleSubmit();
-            }}
+            onSubmit={sessionState.handleSubmit}
             password={sessionState.password}
             requiredOlderKeks={sessionState.requiredOlderKeks}
             setEmail={sessionState.setEmail}

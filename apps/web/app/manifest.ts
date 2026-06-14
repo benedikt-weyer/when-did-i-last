@@ -2,16 +2,16 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Preset Web",
-    short_name: "Preset",
+    name: "When Did I Last",
+    short_name: "WDIL",
     description:
-      "Installable Preset frontend with secure notes, auth flows, and realtime updates.",
+      "A When Did I Last tracker with secure card sync, auth flows, and realtime updates.",
     start_url: "/",
     scope: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#fffef8",
-    theme_color: "#22684f",
+    background_color: "#F5EFB9",
+    theme_color: "#F5EFB9",
     icons: [
       {
         src: "/pwa/icon-192.png",

@@ -92,7 +92,7 @@ export function AccountSettingsScreen() {
             API users
           </Text>
           <Text className={`text-sm ${tokens.body}`}>
-            Create and manage API users linked to your encrypted notes account.
+            Create and manage API users linked to your encrypted cards account.
           </Text>
           <Pressable
             className={`items-center rounded-full px-4 py-4 ${tokens.segmentActive}`}
@@ -396,7 +396,7 @@ function DangerZoneSection({
         Danger zone
       </Text>
       <Text className="text-sm text-rose-800 dark:text-rose-100">
-        Delete your account permanently. This removes the user, linked notes, DEKs, KEKs, and stored encrypted data.
+        Delete your account permanently. This removes the user, linked cards, DEKs, KEKs, and stored encrypted data.
       </Text>
       <Pressable
         className="items-center rounded-full border border-rose-400 px-4 py-4 dark:border-rose-700"
@@ -426,7 +426,7 @@ function confirmDeleteAccount(email: string) {
   return new Promise<boolean>((resolve) => {
     Alert.alert(
       'Delete account',
-      `Delete account ${email}? This permanently removes the user, linked notes, DEKs, KEKs, and stored encrypted data.`,
+      `Delete account ${email}? This permanently removes the user, linked cards, DEKs, KEKs, and stored encrypted data.`,
       [
         {
           style: 'cancel',

@@ -415,12 +415,11 @@ export function AccountPageClient() {
     let latestApiUser = apiUser;
 
     try {
-      for (let index = 0; index < apiUser.provisioning.pendingNoteIds.length; index += 1) {
-        const noteId = apiUser.provisioning.pendingNoteIds[index]!;
+      for (const noteId of apiUser.provisioning.pendingCardIds) {
         const note = notesById.get(noteId);
 
         if (!note) {
-          throw new Error('A note required for api user provisioning is missing from the backend.');
+          throw new Error('A card required for api user provisioning is missing from the backend.');
         }
 
         const noteLinkedKek = findLinkedKek(linkedKeks, note.encryptedDek.kekPublicKey);
@@ -603,7 +602,7 @@ export function AccountPageClient() {
     }
 
     const confirmed = globalThis.confirm(
-      `Delete account ${shared.session.user.email}? This removes the user, linked api users, notes, DEKs, KEKs, and stored encrypted data.`,
+      `Delete account ${shared.session.user.email}? This removes the user, linked api users, cards, DEKs, KEKs, and stored encrypted data.`,
     );
 
     if (!confirmed) {
@@ -898,9 +897,7 @@ export function AccountPageClient() {
             isSubmitting={shared.isSubmitting}
             mode={shared.mode}
             olderPasswords={shared.olderPasswords}
-            onSubmit={() => {
-              void shared.handleSubmit();
-            }}
+            onSubmit={shared.handleSubmit}
             password={shared.password}
             requiredOlderKeks={shared.requiredOlderKeks}
             setEmail={shared.setEmail}

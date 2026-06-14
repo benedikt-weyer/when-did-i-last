@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { MoonStar, SunMedium } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -101,7 +102,7 @@ export function SiteHeader() {
 
   const authLinks = authLabel
     ? [
-        { href: "/notes", label: "Notes" },
+        { href: "/cards", label: "Cards" },
         { href: "/account", label: "Account" },
       ]
     : [
@@ -113,10 +114,14 @@ export function SiteHeader() {
     <header className="sticky top-0 z-50 border-b border-border/60 bg-background/78 backdrop-blur-xl supports-[backdrop-filter]:bg-background/72">
       <div className="flex w-full flex-wrap items-center justify-between gap-3 px-6 py-4 sm:px-10 lg:px-12">
         <Link className="flex items-center gap-3" href="/">
-          <div className="flex size-11 items-center justify-center rounded-2xl border border-border/70 bg-card/85 text-lg font-semibold text-primary shadow-sm">
-            P
-          </div>
-          <p className="text-lg font-semibold tracking-tight text-foreground">Preset Web</p>
+          <Image
+            alt="When Did I Last mark"
+            className="rounded-2xl"
+            height={44}
+            src="/wdil-mark.png"
+            width={44}
+          />
+          <p className="text-lg font-semibold tracking-tight text-foreground">When Did I Last</p>
         </Link>
 
         <nav className="order-3 flex w-full items-center justify-between gap-3 sm:order-2 sm:w-auto sm:flex-1 sm:justify-end">

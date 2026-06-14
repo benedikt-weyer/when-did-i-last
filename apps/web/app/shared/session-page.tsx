@@ -459,7 +459,7 @@ export function SignedOutForm({
 
 			{mode === 'login' && requiredOlderKeks.length > 0 ? (
 				<p className="rounded-[1.2rem] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-					Older KEKs still need passwords before older notes can be unlocked on this device.
+					Older KEKs still need passwords before older cards can be unlocked on this device.
 				</p>
 			) : null}
 
@@ -495,7 +495,7 @@ export function StatusPanel({
 			<p>{statusMessage || 'No recent activity.'}</p>
 			{selectedNoteId ? (
 				<p>
-					Selected note id: <span className="font-mono text-xs">{selectedNoteId}</span>
+					Selected card id: <span className="font-mono text-xs">{selectedNoteId}</span>
 				</p>
 			) : null}
 		</div>
@@ -520,7 +520,7 @@ export function PageShell({
 			<section className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-5xl flex-col gap-6 px-6 py-8 sm:px-10 lg:px-12">
 				<div className="flex flex-col gap-2 border-b border-border/60 pb-4">
 					<p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-						Preset Web
+						When Did I Last
 					</p>
 					<h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
 						{title}

@@ -1,25 +1,30 @@
 {
   "expo": {
-    "name": "preset-mobile",
-    "slug": "preset-mobile",
-    "scheme": "presetmobile",
+    "name": "When Did I Last",
+    "slug": "when-did-i-last",
+    "scheme": "whendidilast",
     "version": "1.0.0",
     "newArchEnabled": false,
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/when-did-i-last-splash-top.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F5EFB9"
+    },
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#F5EFB9",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.benedikt.weyer.presetmobile"
+      "package": "com.benedikt.weyer.whendidilast"
     },
     "web": {
       "favicon": "./assets/favicon.png"

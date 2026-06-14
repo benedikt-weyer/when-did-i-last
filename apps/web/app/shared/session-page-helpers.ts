@@ -71,28 +71,28 @@ export function toNoteRecord(note: {
 
 export function buildInitialNoteSyncMessage(noteCount: number) {
   if (noteCount === 0) {
-    return 'No synced notes yet. Create one to push ciphertext to the backend.';
+    return 'No synced cards yet. Create one to push ciphertext to the backend.';
   }
 
-  return `Loaded ${noteCount} encrypted note${noteCount === 1 ? '' : 's'} from the local offline store.`;
+  return `Loaded ${noteCount} encrypted card${noteCount === 1 ? '' : 's'} from the local offline store.`;
 }
 
 export function buildOfflineSyncFailureMessage(noteCount: number, error: unknown) {
   if (noteCount > 0) {
-    return `Loaded ${noteCount} offline note${noteCount === 1 ? '' : 's'}. Sync will resume when the backend is reachable.`;
+    return `Loaded ${noteCount} offline card${noteCount === 1 ? '' : 's'}. Sync will resume when the backend is reachable.`;
   }
 
-  return error instanceof Error ? error.message : 'Unable to sync encrypted notes.';
+  return error instanceof Error ? error.message : 'Unable to sync encrypted cards.';
 }
 
 export function buildPostLoginNoteMessage(mode: AuthMode, noteCount: number) {
   if (noteCount > 0) {
-    return `Loaded ${noteCount} offline note${noteCount === 1 ? '' : 's'} after login.`;
+    return `Loaded ${noteCount} offline card${noteCount === 1 ? '' : 's'} after login.`;
   }
 
   return mode === 'register'
-    ? 'Account created. Create a note to push ciphertext to the backend.'
-    : 'Logged in. Create a note to push ciphertext to the backend.';
+    ? 'Account created. Create a card to push ciphertext to the backend.'
+    : 'Logged in. Create a card to push ciphertext to the backend.';
 }
 
 export function buildKekMigrationMessage(rewrappedNoteCount: number, kekEpochVersion: number) {
@@ -142,8 +142,8 @@ export function buildImportSummary(createdCount: number, updatedCount: number) {
   }
 
   return segments.length > 0
-    ? `Imported notes: ${segments.join(' and ')}.`
-    : 'The import file did not produce any note changes.';
+    ? `Imported cards: ${segments.join(' and ')}.`
+    : 'The import file did not produce any card changes.';
 }
 
 export function mergeLinkedKeks(linkedKeks: PersistedLinkedKek[]) {

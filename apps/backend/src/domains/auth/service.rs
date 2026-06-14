@@ -105,7 +105,7 @@ pub struct LinkedPrincipal {
 
 pub struct ApiUserProvisioningStatus {
     pub completed_resource_count: u64,
-    pub pending_note_ids: Vec<Uuid>,
+    pub pending_card_ids: Vec<Uuid>,
     pub pending_resource_count: u64,
     pub total_resource_count: u64,
 }
@@ -680,7 +680,7 @@ pub async fn provision_api_user_deks(
         .into_iter()
         .next()
         .ok_or_else(|| AppError::internal("missing kek metadata for the api user"))?;
-    let valid_note_ids = notes::repository::list_note_ids_for_owner(&state.db, authenticated_user.owner_user_id)
+    let valid_card_ids = notes::repository::list_note_ids_for_owner(&state.db, authenticated_user.owner_user_id)
         .await?
         .into_iter()
         .collect::<std::collections::HashSet<_>>();
@@ -688,8 +688,8 @@ pub async fn provision_api_user_deks(
     let wrapped_deks = commands
         .into_iter()
         .map(|command| {
-            if !valid_note_ids.contains(&command.resource_id) {
-                return Err(AppError::validation("resourceId must reference a note owned by the account"));
+            if !valid_card_ids.contains(&command.resource_id) {
+                return Err(AppError::validation("resourceId must reference a card owned by the account"));
             }
 
             let wrapped_dek = map_wrapped_dek(&command.wrapped_dek)?;
@@ -765,11 +765,11 @@ async fn build_api_user_record(
     let label_provisioned = notes::repository::find_wrapped_dek(&state.db, api_user.id, api_user.id)
         .await?
         .is_some();
-    let note_ids = notes::repository::list_note_ids_for_owner(&state.db, api_user.user_id).await?;
-    let pending_note_ids = notes::repository::list_missing_note_ids_for_principal(&state.db, api_user.user_id, api_user.id)
+    let card_ids = notes::repository::list_note_ids_for_owner(&state.db, api_user.user_id).await?;
+    let pending_card_ids = notes::repository::list_missing_note_ids_for_principal(&state.db, api_user.user_id, api_user.id)
         .await?;
-    let total_resource_count = note_ids.len() as u64 + 1;
-    let pending_resource_count = pending_note_ids.len() as u64 + if label_provisioned { 0 } else { 1 };
+    let total_resource_count = card_ids.len() as u64 + 1;
+    let pending_resource_count = pending_card_ids.len() as u64 + if label_provisioned { 0 } else { 1 };
     let completed_resource_count = total_resource_count.saturating_sub(pending_resource_count);
 
     Ok(ApiUserRecord {
@@ -794,7 +794,7 @@ async fn build_api_user_record(
         latest_kek_public_key: latest_kek.kek_public_key,
         provisioning: ApiUserProvisioningStatus {
             completed_resource_count,
-            pending_note_ids,
+            pending_card_ids,
             pending_resource_count,
             total_resource_count,
         },

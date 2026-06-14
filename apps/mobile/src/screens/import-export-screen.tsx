@@ -79,7 +79,7 @@ export function ImportExportScreen() {
 
   const syncOfflineNotes = useCallback(async (nextSession: NonNullable<typeof session>) => {
     if (!activeKekId || linkedKeks.length === 0) {
-      throw new Error('No linked KEK is available for syncing notes yet.');
+      throw new Error('No linked KEK is available for syncing cards yet.');
     }
 
     const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
@@ -106,7 +106,7 @@ export function ImportExportScreen() {
     }).catch((error) => {
       if (isMountedRef.current) {
         setStatusMessage(
-          error instanceof Error ? error.message : 'Unable to initialize the offline notes store.',
+          error instanceof Error ? error.message : 'Unable to initialize the offline cards store.',
         );
       }
     });
@@ -134,7 +134,7 @@ export function ImportExportScreen() {
 
   async function handleExportNotes() {
     if (notes.length === 0) {
-      setStatusMessage('Create or sync at least one note before exporting JSON.');
+      setStatusMessage('Create or sync at least one card before exporting JSON.');
       return;
     }
 
@@ -143,7 +143,7 @@ export function ImportExportScreen() {
     try {
       const { exportImportExportSuite } = await getNativeImportExportSuiteModule();
       const Sharing = await getExpoSharingModule();
-      const noteLabel = `note${notes.length === 1 ? '' : 's'}`;
+      const noteLabel = `card${notes.length === 1 ? '' : 's'}`;
       const protectionLabel = exportPassword ? 'password-protected JSON' : 'cleartext JSON';
       const sharingAvailable = await Sharing.isAvailableAsync();
 
@@ -165,7 +165,7 @@ export function ImportExportScreen() {
       file.create({ overwrite: true });
       file.write(serialized);
       await Sharing.shareAsync(file.uri, {
-        dialogTitle: 'Share exported notes JSON',
+        dialogTitle: 'Share exported cards JSON',
         mimeType: 'application/json',
         UTI: 'public.json',
       });
@@ -173,7 +173,7 @@ export function ImportExportScreen() {
       setStatusMessage(`Exported ${notes.length} ${noteLabel} as ${protectionLabel}.`);
     } catch (error) {
       setStatusMessage(
-        error instanceof Error ? error.message : 'Unable to export the notes as JSON.',
+        error instanceof Error ? error.message : 'Unable to export the cards as JSON.',
       );
     } finally {
       setIsExportingNotes(false);
@@ -268,7 +268,7 @@ export function ImportExportScreen() {
 
   async function handleImportNotes() {
     if (!importPayload) {
-      setStatusMessage('Choose a JSON import file before importing notes.');
+      setStatusMessage('Choose a JSON import file before importing cards.');
       return;
     }
 
@@ -286,7 +286,7 @@ export function ImportExportScreen() {
       );
 
       if (importedNotes.length === 0) {
-        setStatusMessage('The selected import file does not contain any notes.');
+        setStatusMessage('The selected import file does not contain any cards.');
         return;
       }
 
@@ -308,9 +308,9 @@ export function ImportExportScreen() {
     }
   }
 
-  const noteCountLabel = notes.length === 1 ? 'note' : 'notes';
+  const noteCountLabel = notes.length === 1 ? 'card' : 'cards';
   const noteSnapshotMessage =
-    notes.length === 0 ? 'No local notes yet.' : `${notes.length} ${noteCountLabel} ready.`;
+    notes.length === 0 ? 'No local cards yet.' : `${notes.length} ${noteCountLabel} ready.`;
 
   return (
     <ScreenShell
@@ -420,18 +420,18 @@ function buildImportExportSuiteFilename(exportedAt: string) {
 
 function buildInitialNoteSyncMessage(noteCount: number) {
   if (noteCount === 0) {
-    return 'No synced notes yet. Create one to push ciphertext to the backend.';
+    return 'No synced cards yet. Create one to push ciphertext to the backend.';
   }
 
-  return `Loaded ${noteCount} encrypted note${noteCount === 1 ? '' : 's'} from the local offline store.`;
+  return `Loaded ${noteCount} encrypted card${noteCount === 1 ? '' : 's'} from the local offline store.`;
 }
 
 function buildOfflineSyncFailureMessage(noteCount: number, error: unknown) {
   if (noteCount > 0) {
-    return `Loaded ${noteCount} offline note${noteCount === 1 ? '' : 's'}. Sync will resume when the backend is reachable.`;
+    return `Loaded ${noteCount} offline card${noteCount === 1 ? '' : 's'}. Sync will resume when the backend is reachable.`;
   }
 
-  return error instanceof Error ? error.message : 'Unable to sync encrypted notes.';
+  return error instanceof Error ? error.message : 'Unable to sync encrypted cards.';
 }
 
 function buildImportSummary(createdCount: number, updatedCount: number) {
@@ -446,12 +446,12 @@ function buildImportSummary(createdCount: number, updatedCount: number) {
   }
 
   return segments.length > 0
-    ? `Imported notes: ${segments.join(' and ')}.`
-    : 'The import file did not produce any note changes.';
+    ? `Imported cards: ${segments.join(' and ')}.`
+    : 'The import file did not produce any card changes.';
 }
 
 function describeSelectedImport(fileName: string, inspection: ImportExportSuiteInspection) {
-  const noteLabel = `note${inspection.noteCount === 1 ? '' : 's'}`;
+  const noteLabel = `card${inspection.noteCount === 1 ? '' : 's'}`;
   const protectionLabel = inspection.encrypted
     ? 'Password protection is enabled.'
     : 'This export is cleartext.';

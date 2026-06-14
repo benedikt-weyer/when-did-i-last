@@ -880,11 +880,11 @@ async function continueApiUserProvisioning({
   try {
     const { rewrapAsymmetricEncryptedDek } = await getNativeAuthModule();
 
-    for (const noteId of apiUser.provisioning.pendingNoteIds) {
+    for (const noteId of apiUser.provisioning.pendingCardIds) {
       const note = notesById.get(noteId);
 
       if (!note) {
-        throw new Error('A note required for API user provisioning is missing from the backend.');
+        throw new Error('A card required for API user provisioning is missing from the backend.');
       }
 
       const noteLinkedKek = findLinkedKek(linkedKeks, note.encryptedDek.kekPublicKey);

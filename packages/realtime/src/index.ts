@@ -30,7 +30,7 @@ type WebSocketLike = {
 
 type WebSocketLikeConstructor = new (url: string) => WebSocketLike;
 
-const DEFAULT_NOTES_EVENTS_PATH = '/api/notes/events';
+const DEFAULT_NOTES_EVENTS_PATH = '/api/cards/events';
 const DEFAULT_RECONNECT_DELAY_MS = 1_500;
 
 export function buildNoteEventsUrl(baseUrl: string, accessToken: string, path = DEFAULT_NOTES_EVENTS_PATH) {

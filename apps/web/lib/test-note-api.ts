@@ -28,25 +28,25 @@ export type SaveNotePayload = {
   encryptedPayload: KekAsymmetricDekEncryptedPayload['encryptedPayload'];
 };
 
+type NoteResponseBody = NoteResponse | { error?: string } | null;
+type NoteListResponseBody = NoteResponse[] | { error?: string } | null;
+
 export async function fetchNotes(request: AuthenticatedRequest) {
-  const response = await fetch(buildApiUrl(request.baseUrl, '/api/notes'), {
+  const response = await fetch(buildApiUrl(request.baseUrl, '/api/cards'), {
     headers: {
       Authorization: `Bearer ${request.token}`,
     },
     method: 'GET',
   });
 
-  const responseBody = (await response.json().catch(() => null)) as
-    | NoteResponse[]
-    | { error?: string }
-    | null;
+  const responseBody = (await response.json().catch(() => null)) as NoteListResponseBody;
 
   if (!response.ok) {
     throw withResponseStatus(new Error(readErrorMessage(responseBody)), response.status);
   }
 
   if (!Array.isArray(responseBody)) {
-    throw new Error('The backend returned an invalid notes payload.');
+    throw new TypeError('The backend returned an invalid cards payload.');
   }
 
   return responseBody.map(validatePayload);
@@ -60,10 +60,7 @@ export async function fetchNote(request: NoteByIdRequest) {
     method: 'GET',
   });
 
-  const responseBody = (await response.json().catch(() => null)) as
-    | NoteResponse
-    | { error?: string }
-    | null;
+  const responseBody = (await response.json().catch(() => null)) as NoteResponseBody;
 
   if (!response.ok) {
     throw withResponseStatus(new Error(readErrorMessage(responseBody)), response.status);
@@ -73,7 +70,7 @@ export async function fetchNote(request: NoteByIdRequest) {
 }
 
 export async function createNote(request: SaveNoteRequest) {
-  const response = await fetch(buildApiUrl(request.baseUrl, '/api/notes'), {
+  const response = await fetch(buildApiUrl(request.baseUrl, '/api/cards'), {
     body: JSON.stringify(request.payload),
     headers: {
       Authorization: `Bearer ${request.token}`,
@@ -82,10 +79,7 @@ export async function createNote(request: SaveNoteRequest) {
     method: 'POST',
   });
 
-  const responseBody = (await response.json().catch(() => null)) as
-    | NoteResponse
-    | { error?: string }
-    | null;
+  const responseBody = (await response.json().catch(() => null)) as NoteResponseBody;
 
   if (!response.ok) {
     throw withResponseStatus(new Error(readErrorMessage(responseBody)), response.status);
@@ -104,10 +98,7 @@ export async function updateNote(request: UpdateNoteRequest) {
     method: 'PUT',
   });
 
-  const responseBody = (await response.json().catch(() => null)) as
-    | NoteResponse
-    | { error?: string }
-    | null;
+  const responseBody = (await response.json().catch(() => null)) as NoteResponseBody;
 
   if (!response.ok) {
     throw withResponseStatus(new Error(readErrorMessage(responseBody)), response.status);
@@ -135,7 +126,7 @@ export async function deleteNote(request: NoteByIdRequest) {
 }
 
 function validatePayload(
-  responseBody: NoteResponse | { error?: string } | null,
+  responseBody: NoteResponseBody,
 ): NoteResponse {
   if (
     !responseBody ||
@@ -209,7 +200,7 @@ function buildApiUrl(baseUrl: string, path: string) {
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
 
   if (!normalizedBaseUrl) {
-    throw new Error('Set API_BASE_URL for the web app before syncing notes.');
+    throw new Error('Set API_BASE_URL for the web app before syncing cards.');
   }
 
   return `${normalizedBaseUrl}${path}`;
@@ -222,7 +213,7 @@ function buildNotePath(noteId: string) {
     throw new Error('Provide a note id before sending a note request.');
   }
 
-  return `/api/notes/${encodeURIComponent(normalizedNoteId)}`;
+  return `/api/cards/${encodeURIComponent(normalizedNoteId)}`;
 }
 
 function withResponseStatus(error: Error, status: number) {

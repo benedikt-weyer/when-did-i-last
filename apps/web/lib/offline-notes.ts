@@ -123,26 +123,44 @@ export async function createWebOfflineNotesSyncAdapter({
 }
 
 function serializeNoteDocument(note: { content: string; title: string }) {
-  return JSON.stringify(note);
+  return JSON.stringify({
+    lastDoneAt: normalizeLastDoneAt(note.content),
+    question: note.title,
+  });
 }
 
 function deserializeNoteDocument(value: string) {
   try {
-    const parsed = JSON.parse(value) as Partial<{ content: string; title: string }>;
+    const parsed = JSON.parse(value) as Partial<{
+      content: string;
+      lastDoneAt: string | null;
+      question: string;
+      title: string;
+    }>;
+
+    if (
+      typeof parsed?.question === 'string' &&
+      (typeof parsed.lastDoneAt === 'string' || parsed.lastDoneAt === null || parsed.lastDoneAt === undefined)
+    ) {
+      return {
+        content: parsed.lastDoneAt ?? '',
+        title: parsed.question,
+      };
+    }
 
     if (typeof parsed?.title === 'string' && typeof parsed?.content === 'string') {
       return {
-        content: parsed.content,
-        title: parsed.title,
+        content: normalizeLastDoneAt(parsed.content) ?? '',
+        title: parsed.title || parsed.content,
       };
     }
   } catch {
-    // Fall back to treating legacy values as content-only text.
+    // Fall back to treating legacy values as question-only text.
   }
 
   return {
-    content: value,
-    title: '',
+    content: '',
+    title: value,
   };
 }
 
@@ -160,10 +178,20 @@ function buildNoteUrl(baseUrl: string, noteId: string) {
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
 
   if (!normalizedBaseUrl) {
-    throw new Error('Set API_BASE_URL for the web app before syncing notes.');
+    throw new Error('Set API_BASE_URL for the web app before syncing cards.');
   }
 
-  return `${normalizedBaseUrl}/api/notes/${encodeURIComponent(noteId.trim())}`;
+  return `${normalizedBaseUrl}/api/cards/${encodeURIComponent(noteId.trim())}`;
+}
+
+function normalizeLastDoneAt(value: string) {
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return null;
+  }
+
+  return Number.isNaN(Date.parse(trimmedValue)) ? null : trimmedValue;
 }
 
 async function readDeleteResponse(response: Response) {

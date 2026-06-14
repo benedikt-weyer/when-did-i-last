@@ -13,10 +13,10 @@ const sans = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  applicationName: "Preset Web",
-  title: "Preset Web",
+  applicationName: "When Did I Last",
+  title: "When Did I Last",
   description:
-    "Installable Preset frontend with secure notes, auth flows, and realtime updates.",
+    "A When Did I Last tracker with secure card sync, auth flows, and realtime updates.",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Preset",
+    title: "When Did I Last",
   },
   formatDetection: {
     telephone: false,
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#22684f",
+  themeColor: "#F5EFB9",
   colorScheme: "light dark",
 };
 

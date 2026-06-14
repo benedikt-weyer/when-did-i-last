@@ -206,7 +206,7 @@ pub struct WrappedDekResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ApiUserProvisioningResponse {
     completed_resource_count: u64,
-    pending_note_ids: Vec<Uuid>,
+    pending_card_ids: Vec<Uuid>,
     pending_resource_count: u64,
     total_resource_count: u64,
 }
@@ -547,7 +547,7 @@ fn map_api_user_response(api_user: service::ApiUserRecord) -> ApiUserResponse {
         latest_kek_public_key: api_user.latest_kek_public_key,
         provisioning: ApiUserProvisioningResponse {
             completed_resource_count: api_user.provisioning.completed_resource_count,
-            pending_note_ids: api_user.provisioning.pending_note_ids,
+            pending_card_ids: api_user.provisioning.pending_card_ids,
             pending_resource_count: api_user.provisioning.pending_resource_count,
             total_resource_count: api_user.provisioning.total_resource_count,
         },

@@ -1,21 +1,20 @@
+import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Pressable, Text, TextInput, View } from 'react-native';
+import { AppState, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { subscribeToNoteEvents } from '@repo/realtime';
 
-import { ScreenShell } from '../components/screen-shell';
 import {
   createMobileOfflineNotesSyncAdapter,
   getMobileOfflineNotesProvider,
 } from '../features/e2ee/offline-notes';
 import { useAuth } from '../features/auth/auth-context';
 import type { AuthApiResponse } from '../features/auth/auth-api';
-import { useAppTheme } from '../features/theme/theme-context';
-import { themeTokens } from '../theme/theme-tokens';
 
-type DecryptedNote = {
-  content: string;
+type DecryptedCard = {
   createdAt: string;
   id: string;
+  lastDoneAt: string | null;
+  question: string;
   title: string;
   updatedAt: string;
 };
@@ -29,19 +28,27 @@ export function HomeScreen() {
     runWithFreshSession,
     session,
   } = useAuth();
-  const { themeMode } = useAppTheme();
-  const tokens = themeTokens[themeMode];
-  const [noteTitle, setNoteTitle] = useState('');
-  const [noteContent, setNoteContent] = useState('');
-  const [notes, setNotes] = useState<DecryptedNote[]>([]);
-  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const selectedNoteIdRef = useRef<string | null>(null);
+  const [cardQuestion, setCardQuestion] = useState('');
+  const [cards, setCards] = useState<DecryptedCard[]>([]);
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const selectedCardIdRef = useRef<string | null>(null);
   const isMountedRef = useRef(true);
   const [statusMessage, setStatusMessage] = useState('');
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 60_000);
+
+    return () => {
+      clearInterval(timer);
     };
   }, []);
 
@@ -52,18 +59,18 @@ export function HomeScreen() {
 
     const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
 
-    const nextNotes = sortNotes(
-      mobileOfflineNotesProvider.getSnapshot().notes.map((note) => toNoteRecord(note)),
+    const nextCards = sortCards(
+      mobileOfflineNotesProvider.getSnapshot().notes.map((note) => toCardRecord(note)),
     );
 
-    setNotes(nextNotes);
+    setCards(nextCards);
 
-    const nextSelectedNote =
-      nextNotes.find((note) => note.id === selectedNoteIdRef.current) ??
-      nextNotes[0] ??
+    const nextSelectedCard =
+      nextCards.find((card) => card.id === selectedCardIdRef.current) ??
+      nextCards[0] ??
       null;
 
-    applySelectedNote(nextSelectedNote);
+    applySelectedCard(nextSelectedCard);
   }, []);
 
   const syncOfflineNotes = useCallback(async ({
@@ -102,7 +109,7 @@ export function HomeScreen() {
     }).catch((error) => {
       if (isMountedRef.current) {
         setStatusMessage(
-          error instanceof Error ? error.message : 'Unable to initialize the offline notes store.',
+          error instanceof Error ? error.message : 'Unable to initialize the offline cards store.',
         );
       }
     });
@@ -121,14 +128,14 @@ export function HomeScreen() {
       nextSession: session,
     }).then(async () => {
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
-      const noteCount = mobileOfflineNotesProvider.getSnapshot().notes.length;
+      const cardCount = mobileOfflineNotesProvider.getSnapshot().notes.length;
 
-      setStatusMessage(buildInitialNoteSyncMessage(noteCount));
+      setStatusMessage(buildInitialCardSyncMessage(cardCount));
     }).catch(async (error) => {
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
-      const noteCount = mobileOfflineNotesProvider.getSnapshot().notes.length;
+      const cardCount = mobileOfflineNotesProvider.getSnapshot().notes.length;
 
-      setStatusMessage(buildOfflineSyncFailureMessage(noteCount, error));
+      setStatusMessage(buildOfflineSyncFailureMessage(cardCount, error));
     });
   }, [activeKekId, linkedKeks, session, syncOfflineNotes]);
 
@@ -153,7 +160,7 @@ export function HomeScreen() {
             setStatusMessage(
               error instanceof Error
                 ? error.message
-                : 'Unable to sync encrypted notes after the realtime update.',
+                : 'Unable to sync encrypted cards after the realtime update.',
             );
           });
         },
@@ -164,7 +171,7 @@ export function HomeScreen() {
       };
     } catch (error) {
       setStatusMessage(
-        error instanceof Error ? error.message : 'Unable to connect note realtime updates.',
+        error instanceof Error ? error.message : 'Unable to connect card realtime updates.',
       );
     }
   }, [activeKekId, backendUrl, linkedKeks, session, syncOfflineNotes]);
@@ -193,80 +200,48 @@ export function HomeScreen() {
     };
   }, [activeKekId, linkedKeks, session, syncOfflineNotes]);
 
-  function applySelectedNote(note: DecryptedNote | null) {
-    selectedNoteIdRef.current = note?.id ?? null;
-    setSelectedNoteId(note?.id ?? null);
-    setNoteTitle(note?.title ?? '');
-    setNoteContent(note?.content ?? '');
+  function applySelectedCard(card: DecryptedCard | null) {
+    selectedCardIdRef.current = card?.id ?? null;
+    setSelectedCardId(card?.id ?? null);
+    setCardQuestion(card?.question ?? '');
   }
 
-  function handleCreateDraft() {
-    applySelectedNote(null);
-    setStatusMessage('Creating a new encrypted note draft.');
+  function handleCreateCard() {
+    applySelectedCard(null);
+    setStatusMessage('Creating a new encrypted card draft.');
   }
 
-  function handleSelectNote(noteId: string) {
-    const nextNote = notes.find((note) => note.id === noteId) ?? null;
+  function handleSelectCard(cardId: string) {
+    const nextCard = cards.find((card) => card.id === cardId) ?? null;
 
-    applySelectedNote(nextNote);
-    setStatusMessage(nextNote ? `Selected "${nextNote.title || 'Untitled note'}".` : '');
+    applySelectedCard(nextCard);
+    setStatusMessage(nextCard ? `Selected "${nextCard.question || 'Untitled card'}".` : '');
   }
 
-  async function handleSave() {
-    try {
-      const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
-      const savedNote = toNoteRecord(await mobileOfflineNotesProvider.saveNote({
-        content: noteContent,
-        id: selectedNoteId ?? undefined,
-        title: noteTitle,
-      }));
-      const actionLabel = selectedNoteId ? 'Updated' : 'Created';
+  async function handleSaveCard() {
+    const trimmedQuestion = cardQuestion.trim();
 
-      applySelectedNote(savedNote);
-
-      if (!session || linkedKeks.length === 0 || !activeKekId) {
-        setStatusMessage(
-          `${actionLabel} "${savedNote.title || 'Untitled note'}" locally. Sync pending.`,
-        );
-        return;
-      }
-
-      try {
-        await syncOfflineNotes({
-          activeLinkedKekId: activeKekId,
-          linkedKeks,
-          nextSession: session,
-        });
-        setStatusMessage(`${actionLabel} "${savedNote.title || 'Untitled note'}".`);
-      } catch (error) {
-        setStatusMessage(
-          error instanceof Error
-            ? `${actionLabel} "${savedNote.title || 'Untitled note'}" locally. ${error.message}`
-            : `${actionLabel} "${savedNote.title || 'Untitled note'}" locally. Sync pending.`,
-        );
-      }
-    } catch (error) {
-      setStatusMessage(
-        error instanceof Error ? error.message : 'Unable to save the encrypted note.',
-      );
-    }
-  }
-
-  async function handleClear() {
-    if (!selectedNoteId) {
-      applySelectedNote(null);
-      setStatusMessage('Cleared the local note draft.');
+    if (!trimmedQuestion) {
+      setStatusMessage('Enter a question before saving the card.');
       return;
     }
 
     try {
-      const deletedNote = notes.find((note) => note.id === selectedNoteId) ?? null;
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
+      const selectedCard = cards.find((card) => card.id === selectedCardId) ?? null;
+      const savedCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
+        content: selectedCard?.lastDoneAt ?? '',
+        id: selectedCardId ?? undefined,
+        title: trimmedQuestion,
+      }));
+      const actionLabel = selectedCardId ? 'Updated' : 'Created';
 
-      await mobileOfflineNotesProvider.deleteNote(selectedNoteId);
+      applySelectedCard(savedCard);
 
       if (!session || linkedKeks.length === 0 || !activeKekId) {
-        setStatusMessage(`Deleted "${deletedNote?.title || 'Untitled note'}" locally. Sync pending.`);
+        setStatusMessage(
+          `${actionLabel} "${savedCard.question || 'Untitled card'}" locally. Sync pending.`,
+        );
         return;
       }
 
@@ -276,120 +251,228 @@ export function HomeScreen() {
           linkedKeks,
           nextSession: session,
         });
-        setStatusMessage(`Deleted "${deletedNote?.title || 'Untitled note'}".`);
+        setStatusMessage(`${actionLabel} "${savedCard.question || 'Untitled card'}".`);
       } catch (error) {
         setStatusMessage(
           error instanceof Error
-            ? `Deleted "${deletedNote?.title || 'Untitled note'}" locally. ${error.message}`
-            : `Deleted "${deletedNote?.title || 'Untitled note'}" locally. Sync pending.`,
+            ? `${actionLabel} "${savedCard.question || 'Untitled card'}" locally. ${error.message}`
+            : `${actionLabel} "${savedCard.question || 'Untitled card'}" locally. Sync pending.`,
         );
       }
     } catch (error) {
       setStatusMessage(
-        error instanceof Error ? error.message : 'Unable to delete the encrypted note.',
+        error instanceof Error ? error.message : 'Unable to save the encrypted card.',
+      );
+    }
+  }
+
+  async function handleDeleteCard() {
+    if (!selectedCardId) {
+      applySelectedCard(null);
+      setStatusMessage('Cleared the local card draft.');
+      return;
+    }
+
+    try {
+      const deletedCard = cards.find((card) => card.id === selectedCardId) ?? null;
+      const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
+
+      await mobileOfflineNotesProvider.deleteNote(selectedCardId);
+
+      if (!session || linkedKeks.length === 0 || !activeKekId) {
+        setStatusMessage(`Deleted "${deletedCard?.question || 'Untitled card'}" locally. Sync pending.`);
+        return;
+      }
+
+      try {
+        await syncOfflineNotes({
+          activeLinkedKekId: activeKekId,
+          linkedKeks,
+          nextSession: session,
+        });
+        setStatusMessage(`Deleted "${deletedCard?.question || 'Untitled card'}".`);
+      } catch (error) {
+        setStatusMessage(
+          error instanceof Error
+            ? `Deleted "${deletedCard?.question || 'Untitled card'}" locally. ${error.message}`
+            : `Deleted "${deletedCard?.question || 'Untitled card'}" locally. Sync pending.`,
+        );
+      }
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error ? error.message : 'Unable to delete the encrypted card.',
+      );
+    }
+  }
+
+  async function handleMarkNow(cardId: string) {
+    const card = cards.find((entry) => entry.id === cardId) ?? null;
+
+    if (!card) {
+      return;
+    }
+
+    try {
+      const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
+      const savedCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
+        content: new Date().toISOString(),
+        id: card.id,
+        title: card.question,
+      }));
+
+      if (selectedCardIdRef.current === savedCard.id) {
+        applySelectedCard(savedCard);
+      }
+
+      if (!session || linkedKeks.length === 0 || !activeKekId) {
+        setStatusMessage(`Updated "${savedCard.question}" locally. Sync pending.`);
+        return;
+      }
+
+      try {
+        await syncOfflineNotes({
+          activeLinkedKekId: activeKekId,
+          linkedKeks,
+          nextSession: session,
+        });
+        setStatusMessage(`Updated "${savedCard.question}" to now.`);
+      } catch (error) {
+        setStatusMessage(
+          error instanceof Error
+            ? `Updated "${savedCard.question}" locally. ${error.message}`
+            : `Updated "${savedCard.question}" locally. Sync pending.`,
+        );
+      }
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error ? error.message : 'Unable to update the card timestamp.',
       );
     }
   }
 
   return (
-    <ScreenShell
-      themeMode={themeMode}
-      title="Home"
-    >
-      <Text className={`text-sm ${tokens.body}`}>
-        Signed in as {session?.user.email ?? 'unknown'}
-      </Text>
+    <View className="flex-1 bg-[#F5EFB9]">
+      <StatusBar style="dark" />
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{
+          flexGrow: 1,
+          paddingBottom: 32,
+          paddingHorizontal: 16,
+          paddingTop: 24,
+        }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View className="items-center pb-6 pt-4">
+          <Image
+            source={require('../../assets/when-did-i-last-logo-bg-s.png')}
+            style={{ height: 88, width: 88 }}
+          />
+          <Text className="mt-5 text-center text-4xl font-semibold text-neutral-800">
+            When did I last...
+          </Text>
+          <Text className="mt-2 text-sm text-neutral-700">
+            Signed in as {session?.user.email ?? 'unknown'}
+          </Text>
+        </View>
 
-      <View className="gap-3">
-        <Text className={`text-sm uppercase tracking-[2px] ${tokens.kicker}`}>
-          Notes
-        </Text>
-        <View className="gap-2">
+        <View className="gap-3">
           <Pressable
-            className="items-center rounded-full border border-stone-300 px-4 py-3 dark:border-slate-700"
+            className="items-center rounded-full bg-[#47474d] px-4 py-4"
             onPress={() => {
-              handleCreateDraft();
+              handleCreateCard();
             }}
           >
-            <Text className={`text-sm font-semibold uppercase tracking-[1.5px] ${tokens.title}`}>
-              New note
+            <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-white">
+              New card
             </Text>
           </Pressable>
-        </View>
-        <View className="gap-2">
-          {notes.length === 0 ? (
-            <Text className={`rounded-[22px] border border-dashed px-4 py-4 text-sm ${tokens.body}`}>
-              No encrypted notes yet.
+
+          {cards.length === 0 ? (
+            <Text className="rounded-[24px] bg-white px-5 py-5 text-sm text-neutral-700">
+              No encrypted cards yet.
             </Text>
           ) : (
-            notes.map((note) => {
-              const isActive = note.id === selectedNoteId;
+            cards.map((card) => {
+              const isActive = card.id === selectedCardId;
 
               return (
-                <Pressable
-                  className={`rounded-[22px] border px-4 py-4 ${isActive ? tokens.segmentActive : tokens.card}`}
-                  key={note.id}
-                  onPress={() => {
-                    handleSelectNote(note.id);
-                  }}
-                >
-                  <Text className={`text-sm font-semibold ${isActive ? tokens.segmentActiveText : tokens.title}`}>
-                    {note.title || 'Untitled note'}
-                  </Text>
-                  <Text className={`mt-1 text-sm ${isActive ? tokens.segmentActiveText : tokens.body}`} numberOfLines={1}>
-                    {note.content || 'No content yet'}
-                  </Text>
-                </Pressable>
+                <View className="flex-row items-stretch gap-3" key={card.id}>
+                  <Pressable
+                    className={`grow rounded-[24px] border bg-white px-5 py-4 ${isActive ? 'border-neutral-800' : 'border-transparent'}`}
+                    onPress={() => {
+                      handleSelectCard(card.id);
+                    }}
+                  >
+                    <Text className="text-base text-neutral-900">
+                      {appendQuestionMark(card.question)}
+                    </Text>
+                    <View className="my-3 h-px bg-neutral-200" />
+                    <Text className="text-lg font-semibold text-neutral-800">
+                      {formatElapsedTime(card.lastDoneAt, now)}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    className="self-center rounded-2xl bg-white px-4 py-4"
+                    onPress={() => {
+                      void handleMarkNow(card.id);
+                    }}
+                  >
+                    <Text className="font-semibold text-neutral-800">Now</Text>
+                  </Pressable>
+                </View>
               );
             })
           )}
         </View>
-        <TextInput
-          autoCapitalize="sentences"
-          className={`rounded-[22px] border px-4 py-3 text-base ${tokens.card} ${tokens.title}`}
-          onChangeText={setNoteTitle}
-          placeholder="Untitled note"
-          placeholderTextColor={themeMode === 'dark' ? '#94a3b8' : '#78716c'}
-          value={noteTitle}
-        />
-        <TextInput
-          className={`min-h-[150px] rounded-[22px] border px-4 py-4 text-base ${tokens.card} ${tokens.title}`}
-          multiline
-          onChangeText={setNoteContent}
-          placeholder="Write something that should stay encrypted between web and mobile"
-          placeholderTextColor={themeMode === 'dark' ? '#94a3b8' : '#78716c'}
-          textAlignVertical="top"
-          value={noteContent}
-        />
-        <View className="flex-row gap-3">
-          <Pressable
-            className={`flex-1 items-center rounded-full px-4 py-4 ${tokens.segmentActive}`}
-            onPress={() => {
-              void handleSave();
-            }}
-          >
-            <Text className={`text-sm font-semibold uppercase tracking-[1.5px] ${tokens.segmentActiveText}`}>
-              {selectedNoteId ? 'Update note' : 'Create note'}
-            </Text>
-          </Pressable>
-          <Pressable
-            className="flex-1 items-center rounded-full border border-stone-300 px-4 py-4 dark:border-slate-700"
-            onPress={() => {
-              void handleClear();
-            }}
-          >
-            <Text className={`text-sm font-semibold uppercase tracking-[1.5px] ${tokens.title}`}>
-              {selectedNoteId ? 'Delete note' : 'Clear draft'}
-            </Text>
-          </Pressable>
+
+        <View className="mt-6 gap-3">
+          <Text className="text-base font-medium text-neutral-800">When did I last...</Text>
+          <View className="flex-row items-center rounded-[24px] bg-white px-1 py-1">
+            <TextInput
+              autoCapitalize="sentences"
+              className="grow px-4 py-4 text-base text-neutral-900"
+              onChangeText={setCardQuestion}
+              placeholder="water the plants"
+              placeholderTextColor="#6b7280"
+              value={cardQuestion}
+            />
+            <View className="mr-3 rounded-full bg-neutral-100 px-3 py-2">
+              <Text className="text-lg font-semibold text-neutral-700">?</Text>
+            </View>
+          </View>
+          <View className="flex-row gap-3">
+            <Pressable
+              className="items-center justify-center rounded-2xl bg-[#f54848] px-4 py-4"
+              onPress={() => {
+                void handleDeleteCard();
+              }}
+            >
+              <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-white">
+                {selectedCardId ? 'Delete' : 'Clear'}
+              </Text>
+            </Pressable>
+            <Pressable
+              className="flex-1 items-center rounded-2xl bg-[#111111] px-4 py-4"
+              onPress={() => {
+                void handleSaveCard();
+              }}
+            >
+              <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-white">
+                {selectedCardId ? 'Save card' : 'Create card'}
+              </Text>
+            </Pressable>
+          </View>
+          {statusMessage ? (
+            <Text className="text-sm leading-6 text-neutral-700">{statusMessage}</Text>
+          ) : null}
         </View>
-        {statusMessage ? <Text className={`text-sm ${tokens.body}`}>{statusMessage}</Text> : null}
-      </View>
-    </ScreenShell>
+      </ScrollView>
+    </View>
   );
 }
 
-function toNoteRecord(note: {
+function toCardRecord(note: {
   content: string;
   createdAt: string;
   id: string;
@@ -397,30 +480,76 @@ function toNoteRecord(note: {
   updatedAt: string;
 }) {
   return {
-    content: note.content,
     createdAt: note.createdAt,
     id: note.id,
+    lastDoneAt: normalizeLastDoneAt(note.content),
+    question: note.title,
     title: note.title,
     updatedAt: note.updatedAt,
   };
 }
 
-function buildInitialNoteSyncMessage(noteCount: number) {
-  if (noteCount === 0) {
-    return 'No synced notes yet. Create one to push ciphertext to the backend.';
+function buildInitialCardSyncMessage(cardCount: number) {
+  if (cardCount === 0) {
+    return 'No synced cards yet. Create one to push ciphertext to the backend.';
   }
 
-  return `Loaded ${noteCount} encrypted note${noteCount === 1 ? '' : 's'} from the local offline store.`;
+  return `Loaded ${cardCount} encrypted card${cardCount === 1 ? '' : 's'} from the local offline store.`;
 }
 
 function buildOfflineSyncFailureMessage(noteCount: number, error: unknown) {
   if (noteCount > 0) {
-    return `Loaded ${noteCount} offline note${noteCount === 1 ? '' : 's'}. Sync will resume when the backend is reachable.`;
+    return `Loaded ${noteCount} offline card${noteCount === 1 ? '' : 's'}. Sync will resume when the backend is reachable.`;
   }
 
-  return error instanceof Error ? error.message : 'Unable to sync encrypted notes.';
+  return error instanceof Error ? error.message : 'Unable to sync encrypted cards.';
 }
 
-function sortNotes(notes: DecryptedNote[]) {
-  return [...notes].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+function sortCards(cards: DecryptedCard[]) {
+  return [...cards].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function normalizeLastDoneAt(value: string) {
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return null;
+  }
+
+  return Number.isNaN(Date.parse(trimmedValue)) ? null : trimmedValue;
+}
+
+function appendQuestionMark(question: string) {
+  return question.trim().endsWith('?') ? question.trim() : `${question.trim()}?`;
+}
+
+function formatElapsedTime(lastDoneAt: string | null, now: number) {
+  if (!lastDoneAt) {
+    return 'never';
+  }
+
+  const parsedDate = Date.parse(lastDoneAt);
+
+  if (Number.isNaN(parsedDate)) {
+    return 'never';
+  }
+
+  const deltaSeconds = Math.max(Math.floor((now - parsedDate) / 1000), 0);
+  const minutes = Math.floor(deltaSeconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) {
+    return `${hours % 24} hour${hours % 24 === 1 ? '' : 's'} and ${days} day${days === 1 ? '' : 's'} ago`;
+  }
+
+  if (hours > 0) {
+    return `${hours} hour${hours === 1 ? '' : 's'} and ${minutes % 60} minute${minutes % 60 === 1 ? '' : 's'} ago`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  }
+
+  return 'just now';
 }
