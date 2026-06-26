@@ -3,13 +3,8 @@ FROM rust:1-trixie AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src \
-    && printf 'fn main() { println!("build stub"); }\n' > src/main.rs \
-    && cargo build --release \
-    && rm -rf src
-
 COPY src ./src
-RUN cargo build --release
+RUN cargo build --release --locked
 
 FROM debian:trixie-slim AS runtime
 
