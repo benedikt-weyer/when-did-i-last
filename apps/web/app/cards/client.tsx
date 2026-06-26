@@ -687,7 +687,7 @@ export function CardsPageClient() {
               <span className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
                 When did I last...
               </span>
-              <div className="flex items-center rounded-[1.5rem] border border-border bg-white px-2 py-1">
+                <div className="flex items-center rounded-[1.5rem] border border-border bg-background/80 px-2 py-1 transition focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/20">
                 <input
                   autoComplete="off"
                   className="min-w-0 grow bg-transparent px-3 py-3 text-base text-foreground outline-none"
