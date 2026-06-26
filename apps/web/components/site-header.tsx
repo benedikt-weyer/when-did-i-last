@@ -103,6 +103,7 @@ export function SiteHeader() {
   const authLinks = authLabel
     ? [
         { href: "/cards", label: "Cards" },
+        { href: "/settings", label: "Settings" },
         { href: "/account", label: "Account" },
       ]
     : [

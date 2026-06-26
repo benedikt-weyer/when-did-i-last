@@ -6,22 +6,13 @@ import {
   useEffect,
   useRef,
   useState,
-  type ChangeEvent,
 } from 'react';
 import { subscribeToNoteEvents } from '@repo/realtime';
-import {
-  exportImportExportSuite,
-  importImportExportSuite,
-  inspectImportExportSuite,
-  type ImportExportSuiteInspection,
-  type ImportExportSuiteNote,
-} from '@repo/import-export-suite/web';
 
 import { Button } from '@/components/ui/button';
 
 import {
   PageShell,
-  LabeledInput,
   SignedOutForm,
   StatusPanel,
   panelClassName,
@@ -33,12 +24,9 @@ import {
   webOfflineNotesProvider,
 } from '../shared/offline-note-sync';
 import {
-  buildImportExportSuiteFilename,
-  buildImportSummary,
   buildInitialNoteSyncMessage,
   buildOfflineSyncFailureMessage,
   buildPostLoginNoteMessage,
-  downloadTextFile,
   formatTimestamp,
 } from '../shared/session-page-helpers';
 
@@ -53,18 +41,9 @@ type DecryptedCard = {
 export function CardsPageClient() {
   const [cardQuestion, setCardQuestion] = useState('');
   const [cards, setCards] = useState<DecryptedCard[]>([]);
-  const [exportPassword, setExportPassword] = useState('');
-  const [importPassword, setImportPassword] = useState('');
-  const [importFileName, setImportFileName] = useState('');
-  const [importInspection, setImportInspection] =
-    useState<ImportExportSuiteInspection | null>(null);
-  const [importPayload, setImportPayload] = useState<string | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
-  const [isExportingCards, setIsExportingCards] = useState(false);
-  const [isImportingCards, setIsImportingCards] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const selectedCardIdRef = useRef<string | null>(null);
-  const importFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const applySelectedCard = useCallback((card: DecryptedCard | null) => {
     const nextSelectedCardId = card?.id ?? null;
@@ -452,155 +431,6 @@ export function CardsPageClient() {
     }
   }
 
-  async function handleExportCards() {
-    if (cards.length === 0) {
-      shared.setStatusMessage('Create or sync at least one card before exporting JSON.');
-      return;
-    }
-
-    shared.setErrorMessage(null);
-    setIsExportingCards(true);
-
-    try {
-      const cardLabel = `card${cards.length === 1 ? '' : 's'}`;
-      const protectionLabel = exportPassword ? 'password-protected JSON' : 'cleartext JSON';
-      const serialized = await exportImportExportSuite(
-        cards.map((card) => toBackupCard(card)),
-        exportPassword
-          ? {
-              password: exportPassword,
-            }
-          : undefined,
-      );
-      const filename = buildImportExportSuiteFilename(new Date().toISOString());
-
-      downloadTextFile(filename, serialized, 'application/json');
-      setExportPassword('');
-      shared.setStatusMessage(`Exported ${cards.length} ${cardLabel} as ${protectionLabel}.`);
-    } catch (error) {
-      shared.setErrorMessage(
-        error instanceof Error ? error.message : 'Unable to export the cards as JSON.',
-      );
-    } finally {
-      setIsExportingCards(false);
-    }
-  }
-
-  async function handleImportFileSelection(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    shared.setErrorMessage(null);
-
-    try {
-      const serialized = await file.text();
-      const inspection = inspectImportExportSuite(serialized);
-
-      setImportPayload(serialized);
-      setImportFileName(file.name);
-      setImportInspection(inspection);
-      shared.setStatusMessage(
-        inspection.encrypted
-          ? `Selected ${file.name}. This export is password protected.`
-          : `Selected ${file.name}. This export contains cleartext JSON.`,
-      );
-    } catch (error) {
-      setImportPayload(null);
-      setImportFileName('');
-      setImportInspection(null);
-      shared.setErrorMessage(
-        error instanceof Error ? error.message : 'Unable to read the selected import file.',
-      );
-    } finally {
-      event.target.value = '';
-    }
-  }
-
-  async function handleImportCards() {
-    if (!importPayload) {
-      shared.setErrorMessage('Choose a JSON import file before importing cards.');
-      return;
-    }
-
-    shared.setErrorMessage(null);
-    setIsImportingCards(true);
-
-    try {
-      const importedNotes = await importImportExportSuite(
-        importPayload,
-        importPassword
-          ? {
-              password: importPassword,
-            }
-          : undefined,
-      );
-
-      if (importedNotes.length === 0) {
-        shared.setStatusMessage('The selected import file does not contain any cards.');
-        return;
-      }
-
-      let createdCount = 0;
-      let updatedCount = 0;
-      let syncPending = false;
-
-      for (const importedNote of importedNotes) {
-        const existingCard = cards.find((card) => card.id === importedNote.id) ?? null;
-
-        await webOfflineNotesProvider.saveNote({
-          content: normalizeLastDoneAt(importedNote.content) ?? '',
-          id: importedNote.id,
-          title: importedNote.title,
-        });
-
-        if (existingCard) {
-          updatedCount += 1;
-        } else {
-          createdCount += 1;
-        }
-      }
-
-      if (shared.session && shared.linkedKeks.length > 0 && shared.backendUrl.trim()) {
-        try {
-          const syncedCards = sortCards((await syncOfflineNotes({
-            linkedKeks: shared.linkedKeks,
-            nextSession: shared.session,
-            runWithSessionRetry: shared.runWithSessionRetry,
-            trimmedBackendUrl: shared.backendUrl.trim(),
-          })).map(toCardRecord));
-
-          setCards(syncedCards);
-        } catch (error) {
-          syncPending = true;
-          shared.setErrorMessage(
-            error instanceof Error ? error.message : 'Unable to sync the imported cards.',
-          );
-        }
-      } else {
-        syncPending = true;
-      }
-
-      setImportPayload(null);
-      setImportFileName('');
-      setImportInspection(null);
-      setImportPassword('');
-      shared.setStatusMessage(
-        syncPending
-          ? `${buildImportSummary(createdCount, updatedCount)} Sync pending.`
-          : buildImportSummary(createdCount, updatedCount),
-      );
-    } catch (error) {
-      shared.setErrorMessage(
-        error instanceof Error ? error.message : 'Unable to import the JSON export.',
-      );
-    } finally {
-      setIsImportingCards(false);
-    }
-  }
-
   return (
     <PageShell title="When did I last...">
       {shared.session ? (
@@ -687,7 +517,7 @@ export function CardsPageClient() {
               <span className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
                 When did I last...
               </span>
-                <div className="flex items-center rounded-[1.5rem] border border-border bg-background/80 px-2 py-1 transition focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/20">
+              <div className="flex items-center rounded-[1.5rem] border border-border bg-background/80 px-2 py-1 transition focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/20">
                 <input
                   autoComplete="off"
                   className="min-w-0 grow bg-transparent px-3 py-3 text-base text-foreground outline-none"
@@ -720,74 +550,6 @@ export function CardsPageClient() {
                 {selectedCardId ? 'Delete card' : 'Clear draft'}
               </Button>
             </div>
-          </div>
-
-          <div className={panelClassName} id="transfer">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-              Import / export
-            </p>
-            <LabeledInput
-              autoComplete="new-password"
-              label="Export password"
-              onChange={setExportPassword}
-              placeholder="Optional"
-              type="password"
-              value={exportPassword}
-            />
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Button
-                disabled={isExportingCards || cards.length === 0}
-                onClick={() => {
-                  void handleExportCards();
-                }}
-                size="lg"
-                variant="outline"
-              >
-                {isExportingCards ? 'Exporting JSON...' : 'Export JSON'}
-              </Button>
-              <Button
-                onClick={() => {
-                  importFileInputRef.current?.click();
-                }}
-                size="lg"
-                variant="outline"
-              >
-                Choose import file
-              </Button>
-            </div>
-            <input
-              accept="application/json,.json"
-              className="hidden"
-              onChange={handleImportFileSelection}
-              ref={importFileInputRef}
-              type="file"
-            />
-            <LabeledInput
-              autoComplete="current-password"
-              label="Import password"
-              onChange={setImportPassword}
-              placeholder={importInspection?.encrypted ? 'Required for encrypted exports' : 'Only needed for encrypted exports'}
-              type="password"
-              value={importPassword}
-            />
-            <div className="rounded-[1.2rem] border border-border/60 bg-background/80 px-4 py-3 text-sm leading-6 text-foreground/75">
-              {importInspection ? (
-                <p>
-                  {importFileName} · {importInspection.noteCount} card{importInspection.noteCount === 1 ? '' : 's'} · {importInspection.encrypted ? 'encrypted' : 'cleartext'}
-                </p>
-              ) : (
-                <p>No import file selected.</p>
-              )}
-            </div>
-            <Button
-              disabled={isImportingCards || !importPayload}
-              onClick={() => {
-                void handleImportCards();
-              }}
-              size="lg"
-            >
-              {isImportingCards ? 'Importing JSON...' : 'Import selected JSON'}
-            </Button>
           </div>
 
           {shared.errorMessage ? (
@@ -846,16 +608,6 @@ function toCardRecord(note: {
     lastDoneAt: normalizeLastDoneAt(note.content),
     question: note.title,
     updatedAt: note.updatedAt,
-  };
-}
-
-function toBackupCard(card: DecryptedCard): ImportExportSuiteNote {
-  return {
-    content: card.lastDoneAt ?? '',
-    createdAt: card.createdAt,
-    id: card.id,
-    title: card.question,
-    updatedAt: card.updatedAt,
   };
 }
 
