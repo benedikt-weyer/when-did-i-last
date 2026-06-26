@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import {
   useCallback,
   useEffect,
@@ -437,26 +436,9 @@ export function CardsPageClient() {
         <div className="grid w-full gap-4">
           <div className={panelClassName} id="cards">
             <div className="flex flex-col gap-4 border-b border-border/60 pb-5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-4">
-                <Image
-                  alt="When Did I Last mark"
-                  className="rounded-[1.5rem]"
-                  height={84}
-                  src="/wdil-mark.png"
-                  width={84}
-                />
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                    Cards ({cards.length})
-                  </p>
-                  <h2 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">
-                    Track recurring life admin.
-                  </h2>
-                  <p className="mt-2 text-sm leading-6 text-foreground/72">
-                    Signed in as {shared.session.user.email}. Tap a card to edit it, or hit Now when you just did the thing.
-                  </p>
-                </div>
-              </div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+                Cards ({cards.length})
+              </p>
               <Button onClick={handleCreateCard} size="lg" variant="outline">
                 New card
               </Button>
