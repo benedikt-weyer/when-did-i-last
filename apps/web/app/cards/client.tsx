@@ -475,8 +475,8 @@ export function CardsPageClient() {
                     <div
                       className={`grid gap-3 rounded-[1.5rem] border px-4 py-4 transition sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
                         isActive
-                          ? 'border-[#47474d] bg-white shadow-sm'
-                          : 'border-border/60 bg-white/85 hover:border-border'
+                          ? 'border-primary/60 bg-card shadow-sm ring-1 ring-primary/15'
+                          : 'border-border/60 bg-card/85 hover:border-border hover:bg-card'
                       }`}
                       key={card.id}
                     >
