@@ -7,13 +7,14 @@ import {
   useState,
 } from 'react';
 import { subscribeToNoteEvents } from '@repo/realtime';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   MAX_FOLDER_DEPTH,
   parseNoteOrganization,
   serializeCardOrganization,
 } from '@repo/offline-provider';
 import { decryptStringWithAsymmetricKek, encryptStringWithAsymmetricKeks } from '@repo/e2ee-auth/web';
-import { Check, Folder, FolderPlus, Pencil, Trash2, X } from 'lucide-react';
+import { ChartNoAxesColumnIncreasing, Check, Folder, FolderPlus, Pencil, Trash2, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { fetchLinkedPrincipals } from '@/lib/auth-api';
@@ -34,10 +35,12 @@ import {
   buildInitialNoteSyncMessage,
   buildOfflineSyncFailureMessage,
   buildPostLoginNoteMessage,
+  formatTimestamp,
 } from '../shared/session-page-helpers';
 
 type DecryptedCard = {
   createdAt: string;
+  doneAtHistory: string[];
   id: string;
   folderId: string | null;
   lastDoneAt: string | null;
@@ -53,6 +56,27 @@ type DecryptedFolder = {
   updatedAt: string;
 };
 
+type HistoryCutoff = '1h' | '1y' | '24h' | '30d' | '7d' | 'all';
+type HistoryResolution = 'day' | 'hour' | 'minute' | 'month' | 'week' | 'year';
+
+const historyCutoffLabels: Record<HistoryCutoff, string> = {
+  '1h': 'Last hour',
+  '24h': 'Last 24 hours',
+  '7d': 'Last 7 days',
+  '30d': 'Last 30 days',
+  '1y': 'Last year',
+  all: 'All history',
+};
+
+const historyResolutionLabels: Record<HistoryResolution, string> = {
+  year: 'Years',
+  month: 'Months',
+  week: 'Weeks',
+  day: 'Days',
+  hour: 'Hours',
+  minute: 'Minutes',
+};
+
 export function CardsPageClient() {
   const [cardQuestion, setCardQuestion] = useState('');
   const [cards, setCards] = useState<DecryptedCard[]>([]);
@@ -61,6 +85,7 @@ export function CardsPageClient() {
   const [folderTitle, setFolderTitle] = useState('');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [moveTarget, setMoveTarget] = useState<{ id: string; type: 'card' | 'folder' } | null>(null);
+  const [historyCardId, setHistoryCardId] = useState<string | null>(null);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const selectedCardIdRef = useRef<string | null>(null);
@@ -309,7 +334,7 @@ export function CardsPageClient() {
 
     try {
       const newCard = toCardRecord(await webOfflineNotesProvider.saveNote({
-        content: serializeCardOrganization({ folderId: currentFolderId, lastDoneAt: null }),
+        content: serializeCardOrganization({ doneAtHistory: [], folderId: currentFolderId, lastDoneAt: null }),
         title: '',
       }));
 
@@ -374,6 +399,7 @@ export function CardsPageClient() {
     try {
       const savedCard = toCardRecord(await webOfflineNotesProvider.saveNote({
         content: serializeCardOrganization({
+          doneAtHistory: selectedCard.doneAtHistory,
           folderId: selectedCard.folderId,
           lastDoneAt: selectedCard.lastDoneAt,
         }),
@@ -479,10 +505,12 @@ export function CardsPageClient() {
     shared.setErrorMessage(null);
 
     try {
+      const now = new Date().toISOString();
       const savedCard = toCardRecord(await webOfflineNotesProvider.saveNote({
         content: serializeCardOrganization({
+          doneAtHistory: [...card.doneAtHistory, now],
           folderId: card.folderId,
-          lastDoneAt: new Date().toISOString(),
+          lastDoneAt: now,
         }),
         id: card.id,
         title: card.question,
@@ -616,7 +644,7 @@ export function CardsPageClient() {
   async function handleMoveCard(card: DecryptedCard, folderId: string | null) {
     try {
       const savedCard = toCardRecord(await webOfflineNotesProvider.saveNote({
-        content: serializeCardOrganization({ folderId, lastDoneAt: card.lastDoneAt }),
+        content: serializeCardOrganization({ doneAtHistory: card.doneAtHistory, folderId, lastDoneAt: card.lastDoneAt }),
         id: card.id,
         title: card.question,
       }));
@@ -847,6 +875,7 @@ export function CardsPageClient() {
                           </Button>
                         )}
                         <Button aria-label={`Move card ${card.question || 'Untitled card'}`} onClick={() => setMoveTarget({ id: card.id, type: 'card' })} size="sm" title="Move card" variant="outline">Move</Button>
+                        <Button aria-label={`Show history for ${card.question || 'Untitled card'}`} onClick={() => setHistoryCardId(card.id)} size="sm" title="Show history" variant="outline"><ChartNoAxesColumnIncreasing />History</Button>
                         <Button aria-label="Remove card" onClick={() => { void handleDeleteCard(card.id); }} size="icon" title="Remove card" variant="ghost">
                           <Trash2 />
                         </Button>
@@ -892,6 +921,10 @@ export function CardsPageClient() {
             </div>
           ) : null}
 
+          {historyCardId ? (
+            <HistoryDialog card={cards.find((card) => card.id === historyCardId) ?? null} onClose={() => setHistoryCardId(null)} />
+          ) : null}
+
         </div>
       ) : (
         <div className={panelClassName} id="auth">
@@ -928,6 +961,191 @@ export function CardsPageClient() {
   );
 }
 
+function HistoryDialog({ card, onClose }: { card: DecryptedCard | null; onClose: () => void }) {
+  const history = card ? [...card.doneAtHistory].sort((left, right) => left.localeCompare(right)) : [];
+  const initialView = chooseHistoryView(history);
+  const [cutoff, setCutoff] = useState<HistoryCutoff>(initialView.cutoff);
+  const [resolution, setResolution] = useState<HistoryResolution>(initialView.resolution);
+  const series = buildHistorySeries(history, cutoff, resolution);
+
+  if (!card) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-black/35 p-4 sm:items-center sm:justify-center" onClick={onClose}>
+      <div aria-modal="true" className="w-full max-w-lg rounded-lg border border-border bg-card p-5 shadow-xl" onClick={(event) => event.stopPropagation()} role="dialog">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Completion history</p>
+            <h2 className="mt-1 text-lg font-semibold text-foreground">{appendQuestionMark(card.question)}</h2>
+          </div>
+          <Button aria-label="Close history" onClick={onClose} size="icon" title="Close" variant="ghost"><X /></Button>
+        </div>
+
+        {history.length === 0 ? (
+          <p className="mt-6 text-sm text-muted-foreground">No completion history yet.</p>
+        ) : (
+          <>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-sm font-medium text-foreground">
+                Resolution
+                <select className="rounded-md border border-border bg-background px-3 py-2 text-sm font-normal" onChange={(event) => setResolution(event.target.value as HistoryResolution)} value={resolution}>
+                  {Object.entries(historyResolutionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm font-medium text-foreground">
+                Cutoff
+                <select className="rounded-md border border-border bg-background px-3 py-2 text-sm font-normal" onChange={(event) => setCutoff(event.target.value as HistoryCutoff)} value={cutoff}>
+                  {Object.entries(historyCutoffLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="mt-6 h-56">
+              {series.length === 0 ? (
+                <p className="pt-16 text-center text-sm text-muted-foreground">No completions in this range.</p>
+              ) : (
+                <ResponsiveContainer height="100%" width="100%">
+                  <BarChart data={series} margin={{ bottom: 8, left: -18, right: 8, top: 8 }}>
+                    <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" interval="preserveStartEnd" minTickGap={44} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} />
+                    <YAxis allowDecimals={false} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} />
+                    <Tooltip
+                      contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '6px' }}
+                      cursor={{ fill: 'hsl(var(--muted))' }}
+                      formatter={(value) => [`${value} completion${Number(value) === 1 ? '' : 's'}`, 'Count']}
+                    />
+                    <Bar dataKey="count" fill="hsl(var(--primary))" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            <div className="mt-5 max-h-36 overflow-y-auto border-t border-border/60 pt-3">
+              {filterHistoryByCutoff(history, cutoff).slice().reverse().map((timestamp) => (
+                <p className="py-1 text-sm text-foreground/80" key={timestamp}>{formatTimestamp(timestamp)}</p>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function chooseHistoryView(history: string[]) {
+  const span = history.length > 1 ? Date.now() - Date.parse(history[0]!) : 0;
+
+  if (span > 365 * 24 * 60 * 60 * 1000) return { cutoff: 'all' as const, resolution: 'month' as const };
+  if (span > 30 * 24 * 60 * 60 * 1000) return { cutoff: '1y' as const, resolution: 'week' as const };
+  if (span > 7 * 24 * 60 * 60 * 1000) return { cutoff: '30d' as const, resolution: 'day' as const };
+  if (span > 24 * 60 * 60 * 1000) return { cutoff: '7d' as const, resolution: 'hour' as const };
+  if (span > 60 * 60 * 1000) return { cutoff: '24h' as const, resolution: 'hour' as const };
+  return { cutoff: '1h' as const, resolution: 'minute' as const };
+}
+
+function buildHistorySeries(history: string[], cutoff: HistoryCutoff, resolution: HistoryResolution) {
+  if (history.length === 0) {
+    return [];
+  }
+
+  const counts = new Map<string, number>();
+
+  for (const timestamp of filterHistoryByCutoff(history, cutoff)) {
+    const date = new Date(timestamp);
+    const key = getHistoryBucketKey(date, resolution);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const start = getHistorySeriesStart(history, cutoff, resolution);
+  const end = getHistoryBucketStart(new Date(), resolution);
+  const series: Array<{ count: number; key: string; label: string }> = [];
+  const cursor = new Date(start);
+
+  // A finer manual resolution can produce many buckets; keep rendering bounded.
+  while (cursor <= end && series.length < 2_000) {
+    const key = getHistoryBucketKey(cursor, resolution);
+    series.push({ count: counts.get(key) ?? 0, key, label: formatHistoryBucket(cursor, resolution) });
+    advanceHistoryBucket(cursor, resolution);
+  }
+
+  return series;
+}
+
+function getHistorySeriesStart(history: string[], cutoff: HistoryCutoff, resolution: HistoryResolution) {
+  const cutoffMilliseconds: Record<Exclude<HistoryCutoff, 'all'>, number> = {
+    '1h': 60 * 60 * 1000,
+    '24h': 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
+    '1y': 365 * 24 * 60 * 60 * 1000,
+  };
+  const start = cutoff === 'all' ? new Date(history[0]!) : new Date(Date.now() - cutoffMilliseconds[cutoff]);
+  return getHistoryBucketStart(start, resolution);
+}
+
+function getHistoryBucketStart(date: Date, resolution: HistoryResolution) {
+  const start = new Date(date);
+  if (resolution === 'year') start.setUTCMonth(0, 1);
+  if (resolution === 'month') start.setUTCDate(1);
+  if (resolution === 'week') {
+    const dayOfWeek = start.getUTCDay() || 7;
+    start.setUTCDate(start.getUTCDate() - dayOfWeek + 1);
+  }
+  if (resolution === 'year' || resolution === 'month' || resolution === 'week' || resolution === 'day') start.setUTCHours(0, 0, 0, 0);
+  if (resolution === 'hour') start.setUTCMinutes(0, 0, 0);
+  if (resolution === 'minute') start.setUTCSeconds(0, 0);
+  return start;
+}
+
+function advanceHistoryBucket(date: Date, resolution: HistoryResolution) {
+  if (resolution === 'year') date.setUTCFullYear(date.getUTCFullYear() + 1);
+  if (resolution === 'month') date.setUTCMonth(date.getUTCMonth() + 1);
+  if (resolution === 'week') date.setUTCDate(date.getUTCDate() + 7);
+  if (resolution === 'day') date.setUTCDate(date.getUTCDate() + 1);
+  if (resolution === 'hour') date.setUTCHours(date.getUTCHours() + 1);
+  if (resolution === 'minute') date.setUTCMinutes(date.getUTCMinutes() + 1);
+}
+
+function filterHistoryByCutoff(history: string[], cutoff: HistoryCutoff) {
+  const cutoffMilliseconds: Record<Exclude<HistoryCutoff, 'all'>, number> = {
+    '1h': 60 * 60 * 1000,
+    '24h': 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
+    '1y': 365 * 24 * 60 * 60 * 1000,
+  };
+  const threshold = cutoff === 'all' ? null : Date.now() - cutoffMilliseconds[cutoff];
+  return threshold === null ? history : history.filter((timestamp) => Date.parse(timestamp) >= threshold);
+}
+
+function getHistoryBucketKey(date: Date, resolution: HistoryResolution) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  if (resolution === 'year') return `${year}`;
+  if (resolution === 'month') return `${year}-${month}`;
+  if (resolution === 'week') {
+    const weekStart = new Date(Date.UTC(year, date.getUTCMonth(), date.getUTCDate()));
+    const dayOfWeek = weekStart.getUTCDay() || 7;
+    weekStart.setUTCDate(weekStart.getUTCDate() - dayOfWeek + 1);
+    return weekStart.toISOString().slice(0, 10);
+  }
+  if (resolution === 'day') return `${year}-${month}-${day}`;
+  if (resolution === 'hour') return `${year}-${month}-${day}T${hour}`;
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+function formatHistoryBucket(date: Date, resolution: HistoryResolution) {
+  if (resolution === 'year') return `${date.getUTCFullYear()}`;
+  if (resolution === 'month') return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  if (resolution === 'week') return `Week of ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+  if (resolution === 'day') return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  if (resolution === 'hour') return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
+  return date.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
 function toCardRecord(note: {
   content: string;
   createdAt: string;
@@ -943,6 +1161,7 @@ function toCardRecord(note: {
 
   return {
     createdAt: note.createdAt,
+    doneAtHistory: organization.doneAtHistory,
     folderId: organization.folderId,
     id: note.id,
     lastDoneAt: organization.lastDoneAt,

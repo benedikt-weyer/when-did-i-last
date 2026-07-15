@@ -131,6 +131,7 @@ function serializeNoteDocument(note: { content: string; title: string }) {
   const organization = parseNoteOrganization(note.content);
 
   return JSON.stringify({
+    doneAtHistory: organization.kind === 'card' ? organization.doneAtHistory : undefined,
     folderId: organization.kind === 'card' ? organization.folderId : undefined,
     kind: organization.kind,
     lastDoneAt: organization.kind === 'card' ? organization.lastDoneAt : undefined,
@@ -144,6 +145,7 @@ function deserializeNoteDocument(value: string) {
   try {
     const parsed = JSON.parse(value) as Partial<{
       content: string;
+      doneAtHistory: string[];
       folderId: string | null;
       kind: 'card' | 'folder';
       lastDoneAt: string | null;
@@ -163,6 +165,7 @@ function deserializeNoteDocument(value: string) {
     if (parsed?.version === 1 && parsed.kind === 'card' && typeof parsed.question === 'string') {
       return {
         content: serializeCardOrganization({
+          doneAtHistory: parsed.doneAtHistory ?? [],
           folderId: parsed.folderId ?? null,
           lastDoneAt: parsed.lastDoneAt ?? null,
         }),
@@ -175,14 +178,14 @@ function deserializeNoteDocument(value: string) {
       (typeof parsed.lastDoneAt === 'string' || parsed.lastDoneAt === null || parsed.lastDoneAt === undefined)
     ) {
       return {
-        content: serializeCardOrganization({ folderId: null, lastDoneAt: parsed.lastDoneAt ?? null }),
+        content: serializeCardOrganization({ doneAtHistory: [], folderId: null, lastDoneAt: parsed.lastDoneAt ?? null }),
         title: parsed.question,
       };
     }
 
     if (typeof parsed?.title === 'string' && typeof parsed?.content === 'string') {
       return {
-        content: serializeCardOrganization({ folderId: null, lastDoneAt: normalizeLastDoneAt(parsed.content) }),
+        content: serializeCardOrganization({ doneAtHistory: [], folderId: null, lastDoneAt: normalizeLastDoneAt(parsed.content) }),
         title: parsed.title || parsed.content,
       };
     }
@@ -191,7 +194,7 @@ function deserializeNoteDocument(value: string) {
   }
 
   return {
-    content: serializeCardOrganization({ folderId: null, lastDoneAt: null }),
+    content: serializeCardOrganization({ doneAtHistory: [], folderId: null, lastDoneAt: null }),
     title: value,
   };
 }

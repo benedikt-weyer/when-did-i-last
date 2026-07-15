@@ -1,6 +1,7 @@
 export const MAX_FOLDER_DEPTH = 20;
 
 export type CardOrganization = {
+  doneAtHistory: string[];
   folderId: string | null;
   kind: 'card';
   lastDoneAt: string | null;
@@ -17,6 +18,7 @@ export function parseNoteOrganization(value: string): NoteOrganization {
   try {
     const parsed = JSON.parse(value) as Partial<{
       folderId: unknown;
+      doneAtHistory: unknown;
       kind: unknown;
       lastDoneAt: unknown;
       parentFolderId: unknown;
@@ -31,10 +33,14 @@ export function parseNoteOrganization(value: string): NoteOrganization {
     }
 
     if (parsed?.version === 1 && parsed.kind === 'card') {
+      const lastDoneAt = normalizeLastDoneAt(parsed.lastDoneAt);
+      const doneAtHistory = normalizeDoneAtHistory(parsed.doneAtHistory);
+
       return {
         folderId: normalizeOptionalId(parsed.folderId),
+        doneAtHistory: doneAtHistory.length > 0 ? doneAtHistory : lastDoneAt ? [lastDoneAt] : [],
         kind: 'card',
-        lastDoneAt: normalizeLastDoneAt(parsed.lastDoneAt),
+        lastDoneAt,
       };
     }
   } catch {
@@ -42,6 +48,7 @@ export function parseNoteOrganization(value: string): NoteOrganization {
   }
 
   return {
+    doneAtHistory: normalizeLastDoneAt(value) ? [value] : [],
     folderId: null,
     kind: 'card',
     lastDoneAt: normalizeLastDoneAt(value),
@@ -49,10 +56,12 @@ export function parseNoteOrganization(value: string): NoteOrganization {
 }
 
 export function serializeCardOrganization({
+  doneAtHistory,
   folderId,
   lastDoneAt,
-}: Pick<CardOrganization, 'folderId' | 'lastDoneAt'>) {
+}: Pick<CardOrganization, 'doneAtHistory' | 'folderId' | 'lastDoneAt'>) {
   return JSON.stringify({
+    doneAtHistory: normalizeDoneAtHistory(doneAtHistory),
     folderId: normalizeOptionalId(folderId),
     kind: 'card',
     lastDoneAt: normalizeLastDoneAt(lastDoneAt),
@@ -78,4 +87,14 @@ function normalizeLastDoneAt(value: unknown) {
   }
 
   return value;
+}
+
+function normalizeDoneAtHistory(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [...new Set(value.map(normalizeLastDoneAt).filter((entry): entry is string => entry !== null))]
+    .sort((left, right) => left.localeCompare(right))
+    .slice(-500);
 }

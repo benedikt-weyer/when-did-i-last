@@ -20,6 +20,7 @@ import type { AuthApiResponse } from '../features/auth/auth-api';
 
 type DecryptedCard = {
   createdAt: string;
+  doneAtHistory: string[];
   id: string;
   folderId: string | null;
   lastDoneAt: string | null;
@@ -35,6 +36,19 @@ type DecryptedFolder = {
   title: string;
   updatedAt: string;
 };
+
+type HistoryCutoff = '1h' | '1y' | '24h' | '30d' | '7d' | 'all';
+type HistoryResolution = 'day' | 'hour' | 'minute' | 'month' | 'week' | 'year';
+
+const historyCutoffs: Array<{ label: string; value: HistoryCutoff }> = [
+  { label: '1h', value: '1h' }, { label: '24h', value: '24h' }, { label: '7d', value: '7d' },
+  { label: '30d', value: '30d' }, { label: '1y', value: '1y' }, { label: 'All', value: 'all' },
+];
+
+const historyResolutions: Array<{ label: string; value: HistoryResolution }> = [
+  { label: 'Y', value: 'year' }, { label: 'M', value: 'month' }, { label: 'W', value: 'week' },
+  { label: 'D', value: 'day' }, { label: 'H', value: 'hour' }, { label: 'Min', value: 'minute' },
+];
 
 // Expo resolves bundled image assets through require at runtime.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -55,6 +69,7 @@ export function HomeScreen() {
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [folderTitle, setFolderTitle] = useState('');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [historyCardId, setHistoryCardId] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ itemId: string; type: 'card' | 'folder' } | null>(null);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const selectedCardIdRef = useRef<string | null>(null);
@@ -241,7 +256,7 @@ export function HomeScreen() {
     try {
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
       const newCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
-        content: serializeCardOrganization({ folderId: currentFolderId, lastDoneAt: null }),
+        content: serializeCardOrganization({ doneAtHistory: [], folderId: currentFolderId, lastDoneAt: null }),
         title: '',
       }));
       if (!newCard) {
@@ -299,6 +314,7 @@ export function HomeScreen() {
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
       const savedCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
         content: serializeCardOrganization({
+          doneAtHistory: selectedCard.doneAtHistory,
           folderId: selectedCard.folderId,
           lastDoneAt: selectedCard.lastDoneAt,
         }),
@@ -389,11 +405,13 @@ export function HomeScreen() {
     }
 
     try {
+      const now = new Date().toISOString();
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
       const savedCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
         content: serializeCardOrganization({
+          doneAtHistory: [...card.doneAtHistory, now],
           folderId: card.folderId,
-          lastDoneAt: new Date().toISOString(),
+          lastDoneAt: now,
         }),
         id: card.id,
         title: card.question,
@@ -522,7 +540,7 @@ export function HomeScreen() {
     try {
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
       const savedCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
-        content: serializeCardOrganization({ folderId, lastDoneAt: card.lastDoneAt }),
+        content: serializeCardOrganization({ doneAtHistory: card.doneAtHistory, folderId, lastDoneAt: card.lastDoneAt }),
         id: card.id,
         title: card.question,
       }));
@@ -766,6 +784,13 @@ export function HomeScreen() {
                       <Ionicons color="#262626" name="folder-open-outline" size={20} />
                     </Pressable>
                     <Pressable
+                      accessibilityLabel={`Show history for ${card.question || 'Untitled card'}`}
+                      className="rounded-2xl bg-neutral-100 p-3"
+                      onPress={() => setHistoryCardId(card.id)}
+                    >
+                      <Ionicons color="#262626" name="stats-chart-outline" size={20} />
+                    </Pressable>
+                    <Pressable
                       accessibilityLabel="Remove card"
                       className="rounded-2xl bg-red-50 p-3"
                       onPress={() => { void handleDeleteCard(card.id); }}
@@ -829,8 +854,190 @@ export function HomeScreen() {
           </View>
         </View>
       </Modal>
+      <HistoryModal card={cards.find((card) => card.id === historyCardId) ?? null} key={historyCardId ?? 'empty'} onClose={() => setHistoryCardId(null)} />
     </View>
   );
+}
+
+function HistoryModal({ card, onClose }: { card: DecryptedCard | null; onClose: () => void }) {
+  const history = card ? [...card.doneAtHistory].sort((left, right) => left.localeCompare(right)) : [];
+  const initialView = chooseMobileHistoryView(history);
+  const [cutoff, setCutoff] = useState<HistoryCutoff>(initialView.cutoff);
+  const [resolution, setResolution] = useState<HistoryResolution>(initialView.resolution);
+  const series = buildMobileHistorySeries(history, cutoff, resolution);
+  const largestCount = Math.max(...series.map((entry) => entry.count), 1);
+
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} transparent visible={card !== null}>
+      <View className="flex-1 justify-end bg-black/30">
+        <View className="rounded-t-[28px] bg-white px-5 pb-10 pt-5">
+          <View className="flex-row items-start justify-between gap-3">
+            <View className="grow">
+              <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-neutral-600">Completion history</Text>
+              <Text className="mt-1 text-lg font-semibold text-neutral-900">{appendQuestionMark(card?.question ?? '')}</Text>
+            </View>
+            <Pressable accessibilityLabel="Close history" className="rounded-xl bg-neutral-100 p-2" onPress={onClose}>
+              <Ionicons color="#262626" name="close" size={20} />
+            </Pressable>
+          </View>
+          {history.length === 0 ? (
+            <Text className="mt-6 text-sm text-neutral-600">No completion history yet.</Text>
+          ) : (
+            <>
+              <Text className="mt-5 text-xs font-semibold uppercase tracking-[1.5px] text-neutral-600">Resolution</Text>
+              <ScrollView className="mt-2" horizontal showsHorizontalScrollIndicator={false}>
+                <View className="flex-row gap-2">
+                  {historyResolutions.map((entry) => (
+                    <Pressable className={`rounded-xl px-3 py-2 ${resolution === entry.value ? 'bg-neutral-900' : 'bg-neutral-100'}`} key={entry.value} onPress={() => setResolution(entry.value)}>
+                      <Text className={`text-xs font-semibold ${resolution === entry.value ? 'text-white' : 'text-neutral-800'}`}>{entry.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </ScrollView>
+              <Text className="mt-4 text-xs font-semibold uppercase tracking-[1.5px] text-neutral-600">Cutoff</Text>
+              <ScrollView className="mt-2" horizontal showsHorizontalScrollIndicator={false}>
+                <View className="flex-row gap-2">
+                  {historyCutoffs.map((entry) => (
+                    <Pressable className={`rounded-xl px-3 py-2 ${cutoff === entry.value ? 'bg-neutral-900' : 'bg-neutral-100'}`} key={entry.value} onPress={() => setCutoff(entry.value)}>
+                      <Text className={`text-xs font-semibold ${cutoff === entry.value ? 'text-white' : 'text-neutral-800'}`}>{entry.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </ScrollView>
+              <View className="mt-6 h-40 flex-row">
+                <View className="h-full w-10 justify-between pr-2">
+                  <Text className="text-right text-xs text-neutral-600">{largestCount}</Text>
+                  <Text className="text-right text-xs text-neutral-600">{Math.ceil(largestCount / 2)}</Text>
+                  <Text className="text-right text-xs text-neutral-600">0</Text>
+                </View>
+                <View className="h-full grow border-b border-l border-neutral-300 pb-1">
+                  <View className="h-full flex-row items-end gap-1">
+                    {series.map((entry) => (
+                      <View className="flex-1 justify-end" key={entry.key}>
+                        <View className="min-h-2 rounded-t bg-[#47474d]" style={{ height: `${Math.max(12, Math.round((entry.count / largestCount) * 100))}%` }} />
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              </View>
+              <View className="mt-3 flex-row justify-between gap-3">
+                <Text className="text-xs text-neutral-600">{series[0]?.label ?? 'No completions in this range'}</Text>
+                <Text className="text-right text-xs text-neutral-600">{series.at(-1)?.label ?? ''}</Text>
+              </View>
+              <ScrollView className="mt-4 max-h-32 border-t border-neutral-200 pt-2">
+                {filterMobileHistoryByCutoff(history, cutoff).slice().reverse().map((timestamp) => <Text className="py-1 text-sm text-neutral-800" key={timestamp}>{formatHistoryTimestamp(timestamp)}</Text>)}
+              </ScrollView>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function chooseMobileHistoryView(history: string[]) {
+  const span = history.length > 1 ? Date.now() - Date.parse(history[0]!) : 0;
+  if (span > 365 * 24 * 60 * 60 * 1000) return { cutoff: 'all' as const, resolution: 'month' as const };
+  if (span > 30 * 24 * 60 * 60 * 1000) return { cutoff: '1y' as const, resolution: 'week' as const };
+  if (span > 7 * 24 * 60 * 60 * 1000) return { cutoff: '30d' as const, resolution: 'day' as const };
+  if (span > 24 * 60 * 60 * 1000) return { cutoff: '7d' as const, resolution: 'hour' as const };
+  if (span > 60 * 60 * 1000) return { cutoff: '24h' as const, resolution: 'hour' as const };
+  return { cutoff: '1h' as const, resolution: 'minute' as const };
+}
+
+function buildMobileHistorySeries(history: string[], cutoff: HistoryCutoff, resolution: HistoryResolution) {
+  if (history.length === 0) {
+    return [];
+  }
+
+  const counts = new Map<string, number>();
+  for (const timestamp of filterMobileHistoryByCutoff(history, cutoff)) {
+    const date = new Date(timestamp);
+    const key = getMobileHistoryBucketKey(date, resolution);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const start = getMobileHistorySeriesStart(history, cutoff, resolution);
+  const end = getMobileHistoryBucketStart(new Date(), resolution);
+  const series: Array<{ count: number; key: string; label: string }> = [];
+  const cursor = new Date(start);
+
+  while (cursor <= end && series.length < 2_000) {
+    const key = getMobileHistoryBucketKey(cursor, resolution);
+    series.push({ count: counts.get(key) ?? 0, key, label: formatMobileHistoryBucket(cursor, resolution) });
+    advanceMobileHistoryBucket(cursor, resolution);
+  }
+
+  return series;
+}
+
+function getMobileHistorySeriesStart(history: string[], cutoff: HistoryCutoff, resolution: HistoryResolution) {
+  const cutoffMilliseconds: Record<Exclude<HistoryCutoff, 'all'>, number> = {
+    '1h': 60 * 60 * 1000, '24h': 24 * 60 * 60 * 1000, '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000, '1y': 365 * 24 * 60 * 60 * 1000,
+  };
+  const start = cutoff === 'all' ? new Date(history[0]!) : new Date(Date.now() - cutoffMilliseconds[cutoff]);
+  return getMobileHistoryBucketStart(start, resolution);
+}
+
+function getMobileHistoryBucketStart(date: Date, resolution: HistoryResolution) {
+  const start = new Date(date);
+  if (resolution === 'year') start.setUTCMonth(0, 1);
+  if (resolution === 'month') start.setUTCDate(1);
+  if (resolution === 'week') {
+    const dayOfWeek = start.getUTCDay() || 7;
+    start.setUTCDate(start.getUTCDate() - dayOfWeek + 1);
+  }
+  if (resolution === 'year' || resolution === 'month' || resolution === 'week' || resolution === 'day') start.setUTCHours(0, 0, 0, 0);
+  if (resolution === 'hour') start.setUTCMinutes(0, 0, 0);
+  if (resolution === 'minute') start.setUTCSeconds(0, 0);
+  return start;
+}
+
+function advanceMobileHistoryBucket(date: Date, resolution: HistoryResolution) {
+  if (resolution === 'year') date.setUTCFullYear(date.getUTCFullYear() + 1);
+  if (resolution === 'month') date.setUTCMonth(date.getUTCMonth() + 1);
+  if (resolution === 'week') date.setUTCDate(date.getUTCDate() + 7);
+  if (resolution === 'day') date.setUTCDate(date.getUTCDate() + 1);
+  if (resolution === 'hour') date.setUTCHours(date.getUTCHours() + 1);
+  if (resolution === 'minute') date.setUTCMinutes(date.getUTCMinutes() + 1);
+}
+
+function filterMobileHistoryByCutoff(history: string[], cutoff: HistoryCutoff) {
+  const cutoffMilliseconds: Record<Exclude<HistoryCutoff, 'all'>, number> = {
+    '1h': 60 * 60 * 1000, '24h': 24 * 60 * 60 * 1000, '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000, '1y': 365 * 24 * 60 * 60 * 1000,
+  };
+  const threshold = cutoff === 'all' ? null : Date.now() - cutoffMilliseconds[cutoff];
+  return threshold === null ? history : history.filter((timestamp) => Date.parse(timestamp) >= threshold);
+}
+
+function getMobileHistoryBucketKey(date: Date, resolution: HistoryResolution) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  if (resolution === 'year') return `${year}`;
+  if (resolution === 'month') return `${year}-${month}`;
+  if (resolution === 'week') {
+    const weekStart = new Date(Date.UTC(year, date.getUTCMonth(), date.getUTCDate()));
+    const dayOfWeek = weekStart.getUTCDay() || 7;
+    weekStart.setUTCDate(weekStart.getUTCDate() - dayOfWeek + 1);
+    return weekStart.toISOString().slice(0, 10);
+  }
+  if (resolution === 'day') return `${year}-${month}-${day}`;
+  if (resolution === 'hour') return `${year}-${month}-${day}T${hour}`;
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+function formatMobileHistoryBucket(date: Date, resolution: HistoryResolution) {
+  if (resolution === 'year') return `${date.getUTCFullYear()}`;
+  if (resolution === 'month') return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  if (resolution === 'week') return `Week of ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+  if (resolution === 'day') return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  if (resolution === 'hour') return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric' });
+  return date.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
 function toCardRecord(note: {
@@ -848,6 +1055,7 @@ function toCardRecord(note: {
 
   return {
     createdAt: note.createdAt,
+    doneAtHistory: organization.doneAtHistory,
     folderId: organization.folderId,
     id: note.id,
     lastDoneAt: organization.lastDoneAt,
@@ -1038,6 +1246,11 @@ function parseFolderDocument(value: string) {
 
 function appendQuestionMark(question: string) {
   return question.trim().endsWith('?') ? question.trim() : `${question.trim()}?`;
+}
+
+function formatHistoryTimestamp(value: string) {
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? value : timestamp.toLocaleString();
 }
 
 function formatElapsedTime(lastDoneAt: string | null, now: number) {
