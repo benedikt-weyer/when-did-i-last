@@ -846,18 +846,17 @@ export function CardsPageClient() {
                             <Pencil />
                           </Button>
                         )}
+                        <Button aria-label={`Move card ${card.question || 'Untitled card'}`} onClick={() => setMoveTarget({ id: card.id, type: 'card' })} size="sm" title="Move card" variant="outline">Move</Button>
+                        <Button aria-label="Remove card" onClick={() => { void handleDeleteCard(card.id); }} size="icon" title="Remove card" variant="ghost">
+                          <Trash2 />
+                        </Button>
                         <Button
                           aria-label="Mark card as done now"
                           onClick={() => { void handleMarkNow(card.id); }}
                           size="sm"
                           title="Mark as done now"
-                          variant="outline"
                         >
                           Now
-                        </Button>
-                        <Button aria-label={`Move card ${card.question || 'Untitled card'}`} onClick={() => setMoveTarget({ id: card.id, type: 'card' })} size="sm" title="Move card" variant="outline">Move</Button>
-                        <Button aria-label="Remove card" onClick={() => { void handleDeleteCard(card.id); }} size="icon" title="Remove card" variant="ghost">
-                          <Trash2 />
                         </Button>
                       </div>
                     </div>
