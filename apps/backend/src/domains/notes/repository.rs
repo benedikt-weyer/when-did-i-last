@@ -73,12 +73,9 @@ where
         .await
         .map_err(|_| AppError::internal("failed to query notes"))?;
 
-    let deks_by_resource_id = load_deks_for_resources(
-        db,
-        principal_id,
-        notes.iter().map(|note| note.id).collect(),
-    )
-    .await?;
+    let deks_by_resource_id =
+        load_deks_for_resources(db, principal_id, notes.iter().map(|note| note.id).collect())
+            .await?;
 
     notes
         .into_iter()
@@ -288,10 +285,7 @@ where
         .await
         .map_err(|_| AppError::internal("failed to query resource deks"))?;
 
-    Ok(deks
-        .into_iter()
-        .map(|dek| (dek.resource_id, dek))
-        .collect())
+    Ok(deks.into_iter().map(|dek| (dek.resource_id, dek)).collect())
 }
 
 pub async fn list_note_ids_for_owner<C>(db: &C, owner_user_id: Uuid) -> AppResult<Vec<Uuid>>
@@ -366,6 +360,25 @@ where
             updated_at,
         )
         .await?;
+    }
+
+    Ok(())
+}
+
+pub async fn replace_wrapped_deks_for_resource<C>(
+    db: &C,
+    resource_id: Uuid,
+    wrapped_deks: Vec<WrappedDek>,
+    created_at: DateTimeWithTimeZone,
+    updated_at: DateTimeWithTimeZone,
+) -> AppResult<()>
+where
+    C: ConnectionTrait,
+{
+    delete_wrapped_deks_for_resource(db, resource_id).await?;
+
+    for wrapped_dek in wrapped_deks {
+        insert_wrapped_dek(db, resource_id, wrapped_dek, created_at, updated_at).await?;
     }
 
     Ok(())
@@ -460,7 +473,7 @@ where
         .map_err(|_| AppError::internal("failed to update the resource dek"))
 }
 
-async fn delete_wrapped_deks_for_resource<C>(db: &C, resource_id: Uuid) -> AppResult<()>
+pub async fn delete_wrapped_deks_for_resource<C>(db: &C, resource_id: Uuid) -> AppResult<()>
 where
     C: ConnectionTrait,
 {

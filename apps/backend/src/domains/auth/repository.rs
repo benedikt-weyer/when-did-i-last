@@ -97,7 +97,10 @@ where
     Ok(())
 }
 
-pub async fn find_api_user_by_id<C>(db: &C, api_user_id: Uuid) -> AppResult<Option<api_user_entity::Model>>
+pub async fn find_api_user_by_id<C>(
+    db: &C,
+    api_user_id: Uuid,
+) -> AppResult<Option<api_user_entity::Model>>
 where
     C: ConnectionTrait,
 {
@@ -121,7 +124,10 @@ where
         .map_err(|_| AppError::internal("failed to query the api user"))
 }
 
-pub async fn list_api_users_for_owner<C>(db: &C, owner_user_id: Uuid) -> AppResult<Vec<api_user_entity::Model>>
+pub async fn list_api_users_for_owner<C>(
+    db: &C,
+    owner_user_id: Uuid,
+) -> AppResult<Vec<api_user_entity::Model>>
 where
     C: ConnectionTrait,
 {

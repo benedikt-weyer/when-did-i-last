@@ -4,6 +4,7 @@ mod m20260611_000003_create_notes;
 mod m20260612_000003_create_api_users;
 mod m20260612_000004_create_deks;
 mod m20260612_000005_create_kek_metadata;
+mod m20260715_000006_create_folders;
 
 use sea_orm_migration::prelude::*;
 
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260612_000003_create_api_users::Migration),
             Box::new(m20260612_000005_create_kek_metadata::Migration),
             Box::new(m20260612_000004_create_deks::Migration),
+            Box::new(m20260715_000006_create_folders::Migration),
         ]
     }
 }

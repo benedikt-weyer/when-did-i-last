@@ -7,9 +7,17 @@ import {
   useState,
 } from 'react';
 import { subscribeToNoteEvents } from '@repo/realtime';
-import { Check, Pencil, Trash2, X } from 'lucide-react';
+import {
+  MAX_FOLDER_DEPTH,
+  parseNoteOrganization,
+  serializeCardOrganization,
+} from '@repo/offline-provider';
+import { decryptStringWithAsymmetricKek, encryptStringWithAsymmetricKeks } from '@repo/e2ee-auth/web';
+import { Check, FolderPlus, Pencil, Trash2, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { fetchLinkedPrincipals } from '@/lib/auth-api';
+import { fetchFolders, saveFolder } from '@/lib/folder-api';
 
 import {
   PageShell,
@@ -33,14 +41,26 @@ import {
 type DecryptedCard = {
   createdAt: string;
   id: string;
+  folderId: string | null;
   lastDoneAt: string | null;
   question: string;
+  updatedAt: string;
+};
+
+type DecryptedFolder = {
+  createdAt: string;
+  id: string;
+  parentFolderId: string | null;
+  title: string;
   updatedAt: string;
 };
 
 export function CardsPageClient() {
   const [cardQuestion, setCardQuestion] = useState('');
   const [cards, setCards] = useState<DecryptedCard[]>([]);
+  const [folders, setFolders] = useState<DecryptedFolder[]>([]);
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [folderTitle, setFolderTitle] = useState('');
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -55,7 +75,8 @@ export function CardsPageClient() {
   }, []);
 
   const applyOfflineSnapshot = useCallback(() => {
-    const nextCards = sortCards(getOfflineNoteSnapshot().map(toCardRecord));
+    const records = toRecords(getOfflineNoteSnapshot());
+    const nextCards = sortCards(records.cards);
 
     setCards(nextCards);
     applySelectedCard(pickSelectedCard(nextCards, selectedCardIdRef.current));
@@ -69,7 +90,8 @@ export function CardsPageClient() {
         runWithSessionRetry: shared.runWithSessionRetry,
         trimmedBackendUrl,
       });
-      const syncedCards = sortCards(syncedNotes.map(toCardRecord));
+      const records = toRecords(syncedNotes);
+      const syncedCards = sortCards(records.cards);
 
       setCards(syncedCards);
       applySelectedCard(syncedCards[0] ?? null);
@@ -146,7 +168,8 @@ export function CardsPageClient() {
         runWithSessionRetry,
         trimmedBackendUrl,
       }).then((syncedNotes) => {
-        const syncedCards = sortCards(syncedNotes.map(toCardRecord));
+        const records = toRecords(syncedNotes);
+        const syncedCards = sortCards(records.cards);
 
         setCards(syncedCards);
         applySelectedCard(pickSelectedCard(syncedCards, selectedCardIdRef.current));
@@ -172,6 +195,15 @@ export function CardsPageClient() {
   ]);
 
   useEffect(() => {
+    if (!isHydrated || !session || linkedKeks.length === 0 || !backendUrl.trim()) return;
+    void refreshFolders().catch((error) => {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to load encrypted folders.');
+    });
+  // Folder loading is intentionally driven by authentication and key changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendUrl, isHydrated, linkedKeks, session]);
+
+  useEffect(() => {
     if (!isHydrated || !session || linkedKeks.length === 0) {
       return;
     }
@@ -194,7 +226,8 @@ export function CardsPageClient() {
             runWithSessionRetry,
             trimmedBackendUrl,
           }).then((syncedNotes) => {
-            const syncedCards = sortCards(syncedNotes.map(toCardRecord));
+            const records = toRecords(syncedNotes);
+            const syncedCards = sortCards(records.cards);
 
             setCards(syncedCards);
             applySelectedCard(pickSelectedCard(syncedCards, selectedCardIdRef.current));
@@ -245,7 +278,8 @@ export function CardsPageClient() {
         runWithSessionRetry,
         trimmedBackendUrl: backendUrl.trim(),
       }).then((syncedNotes) => {
-        const syncedCards = sortCards(syncedNotes.map(toCardRecord));
+        const records = toRecords(syncedNotes);
+        const syncedCards = sortCards(records.cards);
 
         setCards(syncedCards);
         applySelectedCard(pickSelectedCard(syncedCards, selectedCardIdRef.current));
@@ -277,9 +311,13 @@ export function CardsPageClient() {
 
     try {
       const newCard = toCardRecord(await webOfflineNotesProvider.saveNote({
-        content: '',
+        content: serializeCardOrganization({ folderId: null, lastDoneAt: null }),
         title: '',
       }));
+
+      if (!newCard) {
+        throw new Error('The local note store returned an invalid card.');
+      }
 
       setCards((currentCards) => sortCards([...currentCards, newCard]));
       applySelectedCard(newCard);
@@ -291,14 +329,16 @@ export function CardsPageClient() {
       }
 
       try {
-        const syncedCards = sortCards((await syncOfflineNotes({
+        const syncedNotes = await syncOfflineNotes({
           linkedKeks: shared.linkedKeks,
           nextSession: shared.session,
           runWithSessionRetry: shared.runWithSessionRetry,
           trimmedBackendUrl: shared.backendUrl.trim(),
-        })).map(toCardRecord));
+        });
 
-        setCards(syncedCards);
+        const records = toRecords(syncedNotes);
+
+        setCards(sortCards(records.cards));
         shared.setStatusMessage('Created a new encrypted card.');
       } catch (error) {
         shared.setErrorMessage(
@@ -335,10 +375,16 @@ export function CardsPageClient() {
 
     try {
       const savedCard = toCardRecord(await webOfflineNotesProvider.saveNote({
-        content: selectedCard?.lastDoneAt ?? '',
+        content: serializeCardOrganization({
+          folderId: selectedCard.folderId,
+          lastDoneAt: selectedCard.lastDoneAt,
+        }),
         id: selectedCard.id,
         title: cardQuestion.trim(),
       }));
+      if (!savedCard) {
+        throw new Error('The local note store returned an invalid card.');
+      }
       const actionLabel = 'Updated';
 
       applySelectedCard(savedCard);
@@ -352,14 +398,15 @@ export function CardsPageClient() {
       }
 
       try {
-        const syncedCards = sortCards((await syncOfflineNotes({
+        const syncedNotes = await syncOfflineNotes({
           linkedKeks: shared.linkedKeks,
           nextSession: shared.session,
           runWithSessionRetry: shared.runWithSessionRetry,
           trimmedBackendUrl: shared.backendUrl.trim(),
-        })).map(toCardRecord));
+        });
+        const records = toRecords(syncedNotes);
 
-        setCards(syncedCards);
+        setCards(sortCards(records.cards));
         shared.setStatusMessage(`${actionLabel} "${savedCard.question || 'Untitled card'}".`);
       } catch (error) {
         shared.setErrorMessage(
@@ -399,14 +446,15 @@ export function CardsPageClient() {
       }
 
       try {
-        const syncedCards = sortCards((await syncOfflineNotes({
+        const syncedNotes = await syncOfflineNotes({
           linkedKeks: shared.linkedKeks,
           nextSession: shared.session,
           runWithSessionRetry: shared.runWithSessionRetry,
           trimmedBackendUrl: shared.backendUrl.trim(),
-        })).map(toCardRecord));
+        });
+        const records = toRecords(syncedNotes);
 
-        setCards(syncedCards);
+        setCards(sortCards(records.cards));
         shared.setStatusMessage(`Deleted "${deletedCard?.question || 'Untitled card'}".`);
       } catch (error) {
         shared.setErrorMessage(
@@ -434,10 +482,16 @@ export function CardsPageClient() {
 
     try {
       const savedCard = toCardRecord(await webOfflineNotesProvider.saveNote({
-        content: new Date().toISOString(),
+        content: serializeCardOrganization({
+          folderId: card.folderId,
+          lastDoneAt: new Date().toISOString(),
+        }),
         id: card.id,
         title: card.question,
       }));
+      if (!savedCard) {
+        throw new Error('The local note store returned an invalid card.');
+      }
 
       if (selectedCardIdRef.current === savedCard.id) {
         applySelectedCard(savedCard);
@@ -449,14 +503,15 @@ export function CardsPageClient() {
       }
 
       try {
-        const syncedCards = sortCards((await syncOfflineNotes({
+        const syncedNotes = await syncOfflineNotes({
           linkedKeks: shared.linkedKeks,
           nextSession: shared.session,
           runWithSessionRetry: shared.runWithSessionRetry,
           trimmedBackendUrl: shared.backendUrl.trim(),
-        })).map(toCardRecord));
+        });
+        const records = toRecords(syncedNotes);
 
-        setCards(syncedCards);
+        setCards(sortCards(records.cards));
         shared.setStatusMessage(`Updated "${savedCard.question}" to now.`);
       } catch (error) {
         shared.setErrorMessage(
@@ -471,6 +526,120 @@ export function CardsPageClient() {
     }
   }
 
+  async function syncOrganizationChanges(successMessage: string) {
+    if (!shared.session || shared.linkedKeks.length === 0 || !shared.backendUrl.trim()) {
+      shared.setStatusMessage(`${successMessage} locally. Sync pending.`);
+      return;
+    }
+
+    try {
+      const records = toRecords(await syncOfflineNotes({
+        linkedKeks: shared.linkedKeks,
+        nextSession: shared.session,
+        runWithSessionRetry: shared.runWithSessionRetry,
+        trimmedBackendUrl: shared.backendUrl.trim(),
+      }));
+      setCards(sortCards(records.cards));
+      shared.setStatusMessage(successMessage);
+    } catch (error) {
+      shared.setErrorMessage(error instanceof Error ? error.message : 'Unable to sync organization changes.');
+      shared.setStatusMessage(`${successMessage} locally. Sync pending.`);
+    }
+  }
+
+  async function refreshFolders() {
+    if (!shared.session || shared.linkedKeks.length === 0 || !shared.backendUrl.trim()) return;
+    const remoteFolders = await shared.runWithSessionRetry(shared.session, shared.backendUrl.trim(), (activeSession) =>
+      fetchFolders({ baseUrl: shared.backendUrl, token: activeSession.token }),
+    );
+    const decryptedFolders = await Promise.all(remoteFolders.map(async (folder) => {
+      const kek = shared.linkedKeks.find((entry) => entry.kekPublicKey === folder.encryptedDek.kekPublicKey);
+      if (!kek) throw new Error(`Missing the local KEK for folder ${folder.encryptedDek.kekPublicKey}.`);
+      const document = parseFolderDocument(await decryptStringWithAsymmetricKek(folder, kek.cryptKey));
+      return { createdAt: folder.createdAt, id: folder.id, parentFolderId: document.parentFolderId, title: document.name, updatedAt: folder.updatedAt };
+    }));
+    setFolders(decryptedFolders);
+  }
+
+  async function saveEncryptedFolder({ id, parentFolderId, title }: { id?: string; parentFolderId: string | null; title: string }) {
+    if (!shared.session || shared.linkedKeks.length === 0 || !shared.backendUrl.trim()) throw new Error('Connect to the backend before saving folders.');
+    const principals = await shared.runWithSessionRetry(shared.session, shared.backendUrl.trim(), (activeSession) =>
+      fetchLinkedPrincipals({ baseUrl: shared.backendUrl, token: activeSession.token }),
+    );
+    const encrypted = await encryptStringWithAsymmetricKeks(JSON.stringify({ name: title, parentFolderId, version: 1 }), principals.map((principal) => principal.latestKekPublicKey));
+    const saved = await shared.runWithSessionRetry(shared.session, shared.backendUrl.trim(), (activeSession) => saveFolder({
+      baseUrl: shared.backendUrl,
+      folderId: id,
+      payload: { encryptedDeks: encrypted.encryptedDeks.map((dek, index) => ({ ...dek, userId: principals[index]!.id })), encryptedPayload: encrypted.encryptedPayload },
+      token: activeSession.token,
+    }));
+    return { createdAt: saved.createdAt, id: saved.id, parentFolderId, title, updatedAt: saved.updatedAt } satisfies DecryptedFolder;
+  }
+
+  async function handleCreateFolder() {
+    try {
+      const savedFolder = await saveEncryptedFolder({ parentFolderId: null, title: '' });
+      setFolders((currentFolders) => upsertFolder(currentFolders, savedFolder));
+      setFolderTitle('');
+      setEditingFolderId(savedFolder.id);
+      shared.setStatusMessage(`Created folder "${savedFolder.title}".`);
+    } catch (error) {
+      shared.setErrorMessage(error instanceof Error ? error.message : 'Unable to create the folder.');
+    }
+  }
+
+  function handleStartEditFolder(folder: DecryptedFolder) {
+    setFolderTitle(folder.title);
+    setEditingFolderId(folder.id);
+  }
+
+  async function handleSaveFolder(folder: DecryptedFolder) {
+    try {
+      const savedFolder = await saveEncryptedFolder({
+        id: folder.id,
+        parentFolderId: folder.parentFolderId,
+        title: folderTitle.trim(),
+      });
+      setFolders((currentFolders) => upsertFolder(currentFolders, savedFolder));
+      setEditingFolderId(null);
+      shared.setStatusMessage(`Updated folder "${savedFolder.title}".`);
+    } catch (error) {
+      shared.setErrorMessage(error instanceof Error ? error.message : 'Unable to save the folder.');
+    }
+  }
+
+  async function handleMoveCard(card: DecryptedCard, folderId: string | null) {
+    try {
+      const savedCard = toCardRecord(await webOfflineNotesProvider.saveNote({
+        content: serializeCardOrganization({ folderId, lastDoneAt: card.lastDoneAt }),
+        id: card.id,
+        title: card.question,
+      }));
+      if (!savedCard) {
+        throw new Error('The local note store returned an invalid card.');
+      }
+      setCards((currentCards) => currentCards.map((entry) => entry.id === savedCard.id ? savedCard : entry));
+      await syncOrganizationChanges(`Moved "${savedCard.question || 'Untitled card'}".`);
+    } catch (error) {
+      shared.setErrorMessage(error instanceof Error ? error.message : 'Unable to move the card.');
+    }
+  }
+
+  async function handleMoveFolder(folder: DecryptedFolder, parentFolderId: string | null) {
+    if (!canMoveFolder(folder.id, parentFolderId, folders)) {
+      shared.setErrorMessage(`Folders can be nested at most ${MAX_FOLDER_DEPTH} levels and cannot contain themselves.`);
+      return;
+    }
+
+    try {
+      const savedFolder = await saveEncryptedFolder({ id: folder.id, parentFolderId, title: folder.title });
+      setFolders((currentFolders) => currentFolders.map((entry) => entry.id === savedFolder.id ? savedFolder : entry));
+      shared.setStatusMessage(`Moved folder "${savedFolder.title}".`);
+    } catch (error) {
+      shared.setErrorMessage(error instanceof Error ? error.message : 'Unable to move the folder.');
+    }
+  }
+
   return (
     <PageShell title="When did I last...">
       {shared.session ? (
@@ -480,10 +649,64 @@ export function CardsPageClient() {
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
                 Cards ({cards.length})
               </p>
-              <Button onClick={handleCreateCard} size="lg" variant="outline">
-                New card
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={handleCreateCard} size="lg" variant="outline">New card</Button>
+                <Button onClick={() => { void handleCreateFolder(); }} size="lg">
+                  <FolderPlus />
+                  New folder
+                </Button>
+              </div>
             </div>
+
+            {folders.length > 0 ? (
+              <div className="mt-5 grid gap-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Folders</p>
+                {sortFolders(folders).map((folder) => (
+                  <div
+                    className="grid gap-2 rounded-lg border border-border/60 bg-muted/35 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center"
+                    key={folder.id}
+                    style={{ marginLeft: `${Math.min(getFolderDepth(folder.id, folders) - 1, 6) * 12}px` }}
+                  >
+                    {folder.id === editingFolderId ? (
+                      <input
+                        autoFocus
+                        className="min-w-0 rounded-md border border-border bg-background px-2 py-2 text-sm"
+                        onChange={(event) => setFolderTitle(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') void handleSaveFolder(folder);
+                          if (event.key === 'Escape') setEditingFolderId(null);
+                        }}
+                        placeholder="Folder name"
+                        value={folderTitle}
+                      />
+                    ) : (
+                      <span className="min-w-0 truncate text-sm font-medium text-foreground">{folder.title || 'Untitled folder'}</span>
+                    )}
+                    <select
+                      aria-label={`Move folder ${folder.title}`}
+                      className="rounded-md border border-border bg-background px-2 py-2 text-sm"
+                      onChange={(event) => { void handleMoveFolder(folder, event.target.value || null); }}
+                      value={folder.parentFolderId ?? ''}
+                    >
+                      <option value="">Top level</option>
+                      {folders.filter((target) => target.id !== folder.id && canMoveFolder(folder.id, target.id, folders)).map((target) => (
+                        <option key={target.id} value={target.id}>{formatFolderLabel(target, folders)}</option>
+                      ))}
+                    </select>
+                    <div className="flex gap-1 sm:col-start-2">
+                      {folder.id === editingFolderId ? (
+                        <>
+                          <Button aria-label="Save folder" onClick={() => { void handleSaveFolder(folder); }} size="icon" title="Save folder"><Check /></Button>
+                          <Button aria-label="Cancel editing folder" onClick={() => setEditingFolderId(null)} size="icon" title="Cancel editing folder" variant="outline"><X /></Button>
+                        </>
+                      ) : (
+                        <Button aria-label="Edit folder" onClick={() => handleStartEditFolder(folder)} size="icon" title="Edit folder" variant="outline"><Pencil /></Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             <div className="mt-5 grid gap-3">
               {cards.length === 0 ? (
@@ -562,6 +785,17 @@ export function CardsPageClient() {
                         >
                           Now
                         </Button>
+                        <select
+                          aria-label={`Move card ${card.question || 'Untitled card'}`}
+                          className="h-9 max-w-32 rounded-md border border-border bg-background px-2 text-xs"
+                          onChange={(event) => { void handleMoveCard(card, event.target.value || null); }}
+                          value={card.folderId ?? ''}
+                        >
+                          <option value="">Top level</option>
+                          {sortFolders(folders).map((folder) => (
+                            <option key={folder.id} value={folder.id}>{formatFolderLabel(folder, folders)}</option>
+                          ))}
+                        </select>
                         <Button aria-label="Remove card" onClick={() => { void handleDeleteCard(card.id); }} size="icon" title="Remove card" variant="ghost">
                           <Trash2 />
                         </Button>
@@ -622,28 +856,150 @@ function toCardRecord(note: {
   id: string;
   title: string;
   updatedAt: string;
-}): DecryptedCard {
+}): DecryptedCard | null {
+  const organization = parseNoteOrganization(note.content);
+
+  if (organization.kind !== 'card') {
+    return null;
+  }
+
   return {
     createdAt: note.createdAt,
+    folderId: organization.folderId,
     id: note.id,
-    lastDoneAt: normalizeLastDoneAt(note.content),
+    lastDoneAt: organization.lastDoneAt,
     question: note.title,
     updatedAt: note.updatedAt,
   };
 }
 
-function normalizeLastDoneAt(value: string) {
-  const trimmedValue = value.trim();
+function toFolderRecord(note: {
+  content: string;
+  createdAt: string;
+  id: string;
+  title: string;
+  updatedAt: string;
+}): DecryptedFolder | null {
+  const organization = parseNoteOrganization(note.content);
 
-  if (!trimmedValue) {
+  if (organization.kind !== 'folder') {
     return null;
   }
 
-  return Number.isNaN(Date.parse(trimmedValue)) ? null : trimmedValue;
+  return {
+    createdAt: note.createdAt,
+    id: note.id,
+    parentFolderId: organization.parentFolderId,
+    title: note.title,
+    updatedAt: note.updatedAt,
+  };
+}
+
+function toRecords(notes: Parameters<typeof toCardRecord>[0][]) {
+  const cards: DecryptedCard[] = [];
+  const folders: DecryptedFolder[] = [];
+
+  for (const note of notes) {
+    const card = toCardRecord(note);
+    if (card) {
+      cards.push(card);
+      continue;
+    }
+    const folder = toFolderRecord(note);
+    if (folder) {
+      folders.push(folder);
+    }
+  }
+
+  return { cards, folders };
 }
 
 function sortCards(cards: DecryptedCard[]) {
   return [...cards].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function sortFolders(folders: DecryptedFolder[]) {
+  return [...folders].sort((left, right) => {
+    const depthDifference = getFolderDepth(left.id, folders) - getFolderDepth(right.id, folders);
+    return depthDifference || left.title.localeCompare(right.title);
+  });
+}
+
+function upsertFolder(folders: DecryptedFolder[], savedFolder: DecryptedFolder) {
+  const existingIndex = folders.findIndex((folder) => folder.id === savedFolder.id);
+
+  if (existingIndex === -1) {
+    return [...folders, savedFolder];
+  }
+
+  return folders.map((folder) => folder.id === savedFolder.id ? savedFolder : folder);
+}
+
+function getFolderDepth(folderId: string, folders: DecryptedFolder[]) {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const visited = new Set<string>();
+  let depth = 1;
+  let parentId = byId.get(folderId)?.parentFolderId ?? null;
+
+  while (parentId && !visited.has(parentId)) {
+    visited.add(parentId);
+    depth += 1;
+    parentId = byId.get(parentId)?.parentFolderId ?? null;
+  }
+
+  return depth;
+}
+
+function canMoveFolder(folderId: string, parentFolderId: string | null, folders: DecryptedFolder[]) {
+  if (!parentFolderId) {
+    return true;
+  }
+  if (folderId === parentFolderId || isFolderDescendant(parentFolderId, folderId, folders)) {
+    return false;
+  }
+
+  const subtreeHeight = Math.max(
+    ...folders
+      .filter((folder) => folder.id === folderId || isFolderDescendant(folder.id, folderId, folders))
+      .map((folder) => getFolderDepth(folder.id, folders) - getFolderDepth(folderId, folders) + 1),
+  );
+
+  return getFolderDepth(parentFolderId, folders) + subtreeHeight <= MAX_FOLDER_DEPTH;
+}
+
+function isFolderDescendant(folderId: string, ancestorId: string, folders: DecryptedFolder[]) {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const visited = new Set<string>();
+  let parentId = byId.get(folderId)?.parentFolderId ?? null;
+
+  while (parentId && !visited.has(parentId)) {
+    if (parentId === ancestorId) {
+      return true;
+    }
+    visited.add(parentId);
+    parentId = byId.get(parentId)?.parentFolderId ?? null;
+  }
+
+  return false;
+}
+
+function formatFolderLabel(folder: DecryptedFolder, folders: DecryptedFolder[]) {
+  return `${'  '.repeat(Math.min(getFolderDepth(folder.id, folders) - 1, 6))}${folder.title}`;
+}
+
+function parseFolderDocument(value: string) {
+  try {
+    const parsed = JSON.parse(value) as Partial<{ name: unknown; parentFolderId: unknown; version: unknown }>;
+    if (parsed.version === 1 && typeof parsed.name === 'string') {
+      return {
+        name: parsed.name,
+        parentFolderId: typeof parsed.parentFolderId === 'string' && parsed.parentFolderId.trim() ? parsed.parentFolderId : null,
+      };
+    }
+  } catch {
+    // The folder payload is authenticated before this fallback is used.
+  }
+  throw new Error('The backend returned an invalid encrypted folder.');
 }
 
 function pickSelectedCard(cards: DecryptedCard[], selectedCardId: string | null) {

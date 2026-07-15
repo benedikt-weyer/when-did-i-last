@@ -46,22 +46,22 @@ pub struct SaveNoteRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EncryptedBlobRequest {
-    algorithm: String,
-    ciphertext_hex: String,
-    nonce_hex: String,
-    version: i32,
+    pub algorithm: String,
+    pub ciphertext_hex: String,
+    pub nonce_hex: String,
+    pub version: i32,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WrappedDekRequest {
-    algorithm: String,
-    kem_ciphertext_hex: String,
-    kek_public_key: String,
-    nonce_hex: String,
-    user_id: Uuid,
-    version: i32,
-    wrapped_dek_hex: String,
+    pub algorithm: String,
+    pub kem_ciphertext_hex: String,
+    pub kek_public_key: String,
+    pub nonce_hex: String,
+    pub user_id: Uuid,
+    pub version: i32,
+    pub wrapped_dek_hex: String,
 }
 
 #[derive(Debug, Serialize)]

@@ -10,8 +10,8 @@ pub mod service;
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrincipalKind {
-	User,
-	ApiUser,
+    User,
+    ApiUser,
 }
 
 pub use controller::router;

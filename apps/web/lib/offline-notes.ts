@@ -2,7 +2,12 @@ import {
   decryptStringWithAsymmetricKek,
   encryptStringWithAsymmetricKeks,
 } from '@repo/e2ee-auth/web';
-import type { OfflineNotesSyncAdapter } from '@repo/offline-provider';
+import {
+  parseNoteOrganization,
+  serializeCardOrganization,
+  serializeFolderOrganization,
+  type OfflineNotesSyncAdapter,
+} from '@repo/offline-provider';
 import { createWebOfflineNotesProvider } from '@repo/offline-provider/web';
 
 import {
@@ -123,9 +128,15 @@ export async function createWebOfflineNotesSyncAdapter({
 }
 
 function serializeNoteDocument(note: { content: string; title: string }) {
+  const organization = parseNoteOrganization(note.content);
+
   return JSON.stringify({
-    lastDoneAt: normalizeLastDoneAt(note.content),
+    folderId: organization.kind === 'card' ? organization.folderId : undefined,
+    kind: organization.kind,
+    lastDoneAt: organization.kind === 'card' ? organization.lastDoneAt : undefined,
+    parentFolderId: organization.kind === 'folder' ? organization.parentFolderId : undefined,
     question: note.title,
+    version: 1,
   });
 }
 
@@ -133,24 +144,45 @@ function deserializeNoteDocument(value: string) {
   try {
     const parsed = JSON.parse(value) as Partial<{
       content: string;
+      folderId: string | null;
+      kind: 'card' | 'folder';
       lastDoneAt: string | null;
+      parentFolderId: string | null;
       question: string;
       title: string;
+      version: number;
     }>;
+
+    if (parsed?.version === 1 && parsed.kind === 'folder' && typeof parsed.question === 'string') {
+      return {
+        content: serializeFolderOrganization(parsed.parentFolderId ?? null),
+        title: parsed.question,
+      };
+    }
+
+    if (parsed?.version === 1 && parsed.kind === 'card' && typeof parsed.question === 'string') {
+      return {
+        content: serializeCardOrganization({
+          folderId: parsed.folderId ?? null,
+          lastDoneAt: parsed.lastDoneAt ?? null,
+        }),
+        title: parsed.question,
+      };
+    }
 
     if (
       typeof parsed?.question === 'string' &&
       (typeof parsed.lastDoneAt === 'string' || parsed.lastDoneAt === null || parsed.lastDoneAt === undefined)
     ) {
       return {
-        content: parsed.lastDoneAt ?? '',
+        content: serializeCardOrganization({ folderId: null, lastDoneAt: parsed.lastDoneAt ?? null }),
         title: parsed.question,
       };
     }
 
     if (typeof parsed?.title === 'string' && typeof parsed?.content === 'string') {
       return {
-        content: normalizeLastDoneAt(parsed.content) ?? '',
+        content: serializeCardOrganization({ folderId: null, lastDoneAt: normalizeLastDoneAt(parsed.content) }),
         title: parsed.title || parsed.content,
       };
     }
@@ -159,7 +191,7 @@ function deserializeNoteDocument(value: string) {
   }
 
   return {
-    content: '',
+    content: serializeCardOrganization({ folderId: null, lastDoneAt: null }),
     title: value,
   };
 }

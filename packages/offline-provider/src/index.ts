@@ -10,3 +10,12 @@ export {
   type StoredOfflineNote,
   type SyncedNoteMetadata,
 } from './core';
+export {
+  MAX_FOLDER_DEPTH,
+  parseNoteOrganization,
+  serializeCardOrganization,
+  serializeFolderOrganization,
+  type CardOrganization,
+  type FolderOrganization,
+  type NoteOrganization,
+} from './card-organization';

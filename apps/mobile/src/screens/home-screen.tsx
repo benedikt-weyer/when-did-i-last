@@ -1,21 +1,37 @@
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { AppState, Image, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { subscribeToNoteEvents } from '@repo/realtime';
 import { Ionicons } from '@expo/vector-icons';
+import {
+  MAX_FOLDER_DEPTH,
+  parseNoteOrganization,
+  serializeCardOrganization,
+} from '@repo/offline-provider';
 
 import {
   createMobileOfflineNotesSyncAdapter,
   getMobileOfflineNotesProvider,
 } from '../features/e2ee/offline-notes';
+import { fetchFolders, saveFolder } from '../features/e2ee/folder-api';
+import { getNativeAuthModule } from '../features/e2ee/native-runtime';
 import { useAuth } from '../features/auth/auth-context';
 import type { AuthApiResponse } from '../features/auth/auth-api';
 
 type DecryptedCard = {
   createdAt: string;
   id: string;
+  folderId: string | null;
   lastDoneAt: string | null;
   question: string;
+  title: string;
+  updatedAt: string;
+};
+
+type DecryptedFolder = {
+  createdAt: string;
+  id: string;
+  parentFolderId: string | null;
   title: string;
   updatedAt: string;
 };
@@ -35,6 +51,10 @@ export function HomeScreen() {
   } = useAuth();
   const [cardQuestion, setCardQuestion] = useState('');
   const [cards, setCards] = useState<DecryptedCard[]>([]);
+  const [folders, setFolders] = useState<DecryptedFolder[]>([]);
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [folderTitle, setFolderTitle] = useState('');
+  const [picker, setPicker] = useState<{ itemId: string; type: 'card' | 'folder' } | null>(null);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const selectedCardIdRef = useRef<string | null>(null);
   const isMountedRef = useRef(true);
@@ -64,9 +84,8 @@ export function HomeScreen() {
 
     const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
 
-    const nextCards = sortCards(
-      mobileOfflineNotesProvider.getSnapshot().notes.map((note) => toCardRecord(note)),
-    );
+    const records = toRecords(mobileOfflineNotesProvider.getSnapshot().notes);
+    const nextCards = sortCards(records.cards);
 
     setCards(nextCards);
 
@@ -145,6 +164,13 @@ export function HomeScreen() {
   }, [activeKekId, linkedKeks, session, syncOfflineNotes]);
 
   useEffect(() => {
+    if (!session || linkedKeks.length === 0 || !activeKekId || !backendUrl.trim()) return;
+    void refreshFolders().catch((error) => setStatusMessage(error instanceof Error ? error.message : 'Unable to load encrypted folders.'));
+  // Folder loading is intentionally driven by authentication and key changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKekId, backendUrl, linkedKeks, session]);
+
+  useEffect(() => {
     if (!session || linkedKeks.length === 0 || !activeKekId) {
       return;
     }
@@ -214,9 +240,12 @@ export function HomeScreen() {
     try {
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
       const newCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
-        content: '',
+        content: serializeCardOrganization({ folderId: null, lastDoneAt: null }),
         title: '',
       }));
+      if (!newCard) {
+        throw new Error('The local note store returned an invalid card.');
+      }
 
       setCards((currentCards) => sortCards([...currentCards, newCard]));
       applySelectedCard(newCard);
@@ -268,10 +297,16 @@ export function HomeScreen() {
     try {
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
       const savedCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
-        content: selectedCard?.lastDoneAt ?? '',
+        content: serializeCardOrganization({
+          folderId: selectedCard.folderId,
+          lastDoneAt: selectedCard.lastDoneAt,
+        }),
         id: selectedCard.id,
         title: cardQuestion.trim(),
       }));
+      if (!savedCard) {
+        throw new Error('The local note store returned an invalid card.');
+      }
       const actionLabel = 'Updated';
 
       applySelectedCard(savedCard);
@@ -355,10 +390,16 @@ export function HomeScreen() {
     try {
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
       const savedCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
-        content: new Date().toISOString(),
+        content: serializeCardOrganization({
+          folderId: card.folderId,
+          lastDoneAt: new Date().toISOString(),
+        }),
         id: card.id,
         title: card.question,
       }));
+      if (!savedCard) {
+        throw new Error('The local note store returned an invalid card.');
+      }
 
       if (selectedCardIdRef.current === savedCard.id) {
         applySelectedCard(savedCard);
@@ -390,6 +431,118 @@ export function HomeScreen() {
     }
   }
 
+  async function syncOrganizationChanges(successMessage: string) {
+    if (!session || linkedKeks.length === 0 || !activeKekId) {
+      setStatusMessage(`${successMessage} locally. Sync pending.`);
+      return;
+    }
+
+    try {
+      await syncOfflineNotes({
+        activeLinkedKekId: activeKekId,
+        linkedKeks,
+        nextSession: session,
+      });
+      setStatusMessage(successMessage);
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error ? `${successMessage} locally. ${error.message}` : `${successMessage} locally. Sync pending.`,
+      );
+    }
+  }
+
+  async function refreshFolders() {
+    if (!session) return;
+    const remoteFolders = await runWithFreshSession((activeSession) => fetchFolders({ baseUrl: backendUrl, token: activeSession.token }));
+    const { decryptStringWithAsymmetricKek } = await getNativeAuthModule();
+    const decryptedFolders = await Promise.all(remoteFolders.map(async (folder) => {
+      const kek = linkedKeks.find((entry) => entry.kekPublicKey === folder.encryptedDek.kekPublicKey);
+      if (!kek) throw new Error(`Missing the local KEK for folder ${folder.encryptedDek.kekPublicKey}.`);
+      const document = parseFolderDocument(await decryptStringWithAsymmetricKek(folder, kek.cryptKey));
+      return { createdAt: folder.createdAt, id: folder.id, parentFolderId: document.parentFolderId, title: document.name, updatedAt: folder.updatedAt };
+    }));
+    setFolders(decryptedFolders);
+  }
+
+  async function saveEncryptedFolder({ id, parentFolderId, title }: { id?: string; parentFolderId: string | null; title: string }) {
+    if (!session || !activeKekId) throw new Error('Connect to the backend before saving folders.');
+    const { encryptStringWithAsymmetricKek } = await getNativeAuthModule();
+    const kek = linkedKeks.find((entry) => entry.kekPublicKey === activeKekId);
+    if (!kek) throw new Error('Missing the active local KEK for the folder.');
+    const encrypted = await encryptStringWithAsymmetricKek(JSON.stringify({ name: title, parentFolderId, version: 1 }), kek.kekPublicKey);
+    const saved = await runWithFreshSession((activeSession) => saveFolder({
+      baseUrl: backendUrl, folderId: id,
+      payload: { encryptedDeks: [{ ...encrypted.encryptedDek, userId: activeSession.user.id }], encryptedPayload: encrypted.encryptedPayload },
+      token: activeSession.token,
+    }));
+    return { createdAt: saved.createdAt, id: saved.id, parentFolderId, title, updatedAt: saved.updatedAt } satisfies DecryptedFolder;
+  }
+
+  async function handleCreateFolder() {
+    try {
+      const savedFolder = await saveEncryptedFolder({ parentFolderId: null, title: '' });
+      setFolders((currentFolders) => upsertFolder(currentFolders, savedFolder));
+      setFolderTitle('');
+      setEditingFolderId(savedFolder.id);
+      setStatusMessage(`Created folder "${savedFolder.title}".`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to create the folder.');
+    }
+  }
+
+  function handleStartEditFolder(folder: DecryptedFolder) {
+    setFolderTitle(folder.title);
+    setEditingFolderId(folder.id);
+  }
+
+  async function handleSaveFolder(folder: DecryptedFolder) {
+    try {
+      const savedFolder = await saveEncryptedFolder({
+        id: folder.id,
+        parentFolderId: folder.parentFolderId,
+        title: folderTitle.trim(),
+      });
+      setFolders((currentFolders) => upsertFolder(currentFolders, savedFolder));
+      setEditingFolderId(null);
+      setStatusMessage(`Updated folder "${savedFolder.title}".`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to save the folder.');
+    }
+  }
+
+  async function handleMoveCard(card: DecryptedCard, folderId: string | null) {
+    try {
+      const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
+      const savedCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
+        content: serializeCardOrganization({ folderId, lastDoneAt: card.lastDoneAt }),
+        id: card.id,
+        title: card.question,
+      }));
+      if (!savedCard) {
+        throw new Error('The local note store returned an invalid card.');
+      }
+      setCards((currentCards) => currentCards.map((entry) => entry.id === savedCard.id ? savedCard : entry));
+      await syncOrganizationChanges(`Moved "${savedCard.question || 'Untitled card'}".`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to move the card.');
+    }
+  }
+
+  async function handleMoveFolder(folder: DecryptedFolder, parentFolderId: string | null) {
+    if (!canMoveFolder(folder.id, parentFolderId, folders)) {
+      setStatusMessage(`Folders can be nested at most ${MAX_FOLDER_DEPTH} levels and cannot contain themselves.`);
+      return;
+    }
+
+    try {
+      const savedFolder = await saveEncryptedFolder({ id: folder.id, parentFolderId, title: folder.title });
+      setFolders((currentFolders) => currentFolders.map((entry) => entry.id === savedFolder.id ? savedFolder : entry));
+      setStatusMessage(`Moved folder "${savedFolder.title}".`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to move the folder.');
+    }
+  }
+
   return (
     <View className="flex-1 bg-[#F5EFB9]">
       <StatusBar style="dark" />
@@ -417,16 +570,49 @@ export function HomeScreen() {
         </View>
 
         <View className="gap-3">
-          <Pressable
-            className="items-center rounded-full bg-[#47474d] px-4 py-4"
-            onPress={() => {
-              handleCreateCard();
-            }}
-          >
-            <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-white">
-              New card
-            </Text>
-          </Pressable>
+          <View className="flex-row gap-3">
+            <Pressable className="flex-1 items-center rounded-full bg-[#47474d] px-4 py-4" onPress={() => { void handleCreateCard(); }}>
+              <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-white">New card</Text>
+            </Pressable>
+            <Pressable className="flex-1 items-center rounded-full bg-[#202d47] px-4 py-4" onPress={() => { void handleCreateFolder(); }}>
+              <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-white">New folder</Text>
+            </Pressable>
+          </View>
+
+          {folders.length > 0 ? (
+            <View className="gap-2">
+              <Text className="mt-2 text-xs font-semibold uppercase tracking-[1.5px] text-neutral-600">Folders</Text>
+              {sortFolders(folders).map((folder) => (
+                <View className="flex-row items-center justify-between rounded-[18px] bg-[#e9edf1] px-4 py-3" key={folder.id} style={{ marginLeft: Math.min(getFolderDepth(folder.id, folders) - 1, 5) * 10 }}>
+                  {folder.id === editingFolderId ? (
+                    <TextInput
+                      autoFocus
+                      className="max-w-[62%] grow border-b border-neutral-300 py-1 text-base text-neutral-900"
+                      onChangeText={setFolderTitle}
+                      onSubmitEditing={() => { void handleSaveFolder(folder); }}
+                      placeholder="Folder name"
+                      placeholderTextColor="#6b7280"
+                      value={folderTitle}
+                    />
+                  ) : (
+                    <Text className="max-w-[62%] text-base font-semibold text-neutral-900" numberOfLines={1}>{folder.title || 'Untitled folder'}</Text>
+                  )}
+                  <Pressable accessibilityLabel={`Move folder ${folder.title}`} className="rounded-xl bg-white px-3 py-2" onPress={() => setPicker({ itemId: folder.id, type: 'folder' })}>
+                    <Text className="text-xs font-semibold text-neutral-800">Move</Text>
+                  </Pressable>
+                  {folder.id === editingFolderId ? (
+                    <Pressable accessibilityLabel="Save folder" className="rounded-xl bg-neutral-900 p-2" onPress={() => { void handleSaveFolder(folder); }}>
+                      <Ionicons color="#ffffff" name="checkmark" size={20} />
+                    </Pressable>
+                  ) : (
+                    <Pressable accessibilityLabel={`Edit folder ${folder.title}`} className="rounded-xl bg-white p-2" onPress={() => handleStartEditFolder(folder)}>
+                      <Ionicons color="#262626" name="pencil-outline" size={20} />
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+            </View>
+          ) : null}
 
           {cards.length === 0 ? (
             <Text className="rounded-[24px] bg-white px-5 py-5 text-sm text-neutral-700">
@@ -504,6 +690,13 @@ export function HomeScreen() {
                       <Text className="font-semibold text-neutral-800">Now</Text>
                     </Pressable>
                     <Pressable
+                      accessibilityLabel={`Move card ${card.question || 'Untitled card'}`}
+                      className="rounded-2xl bg-neutral-100 px-3 py-3"
+                      onPress={() => setPicker({ itemId: card.id, type: 'card' })}
+                    >
+                      <Ionicons color="#262626" name="folder-open-outline" size={20} />
+                    </Pressable>
+                    <Pressable
                       accessibilityLabel="Remove card"
                       className="rounded-2xl bg-red-50 p-3"
                       onPress={() => { void handleDeleteCard(card.id); }}
@@ -520,6 +713,53 @@ export function HomeScreen() {
           <Text className="mt-6 text-sm leading-6 text-neutral-700">{statusMessage}</Text>
         ) : null}
       </ScrollView>
+      <Modal animationType="slide" onRequestClose={() => setPicker(null)} transparent visible={picker !== null}>
+        <View className="flex-1 justify-end bg-black/30">
+          <View className="max-h-[70%] rounded-t-[28px] bg-white px-5 pb-10 pt-5">
+            <Text className="mb-3 text-lg font-semibold text-neutral-900">Move to folder</Text>
+            <ScrollView>
+              <Pressable
+                className="border-b border-neutral-100 py-4"
+                onPress={() => {
+                  if (picker?.type === 'card') {
+                    const card = cards.find((entry) => entry.id === picker.itemId);
+                    if (card) void handleMoveCard(card, null);
+                  } else if (picker?.type === 'folder') {
+                    const folder = folders.find((entry) => entry.id === picker.itemId);
+                    if (folder) void handleMoveFolder(folder, null);
+                  }
+                  setPicker(null);
+                }}
+              >
+                <Text className="text-base text-neutral-900">Top level</Text>
+              </Pressable>
+              {sortFolders(folders).filter((folder) => {
+                return picker?.type !== 'folder' || canMoveFolder(picker.itemId, folder.id, folders);
+              }).map((folder) => (
+                <Pressable
+                  className="border-b border-neutral-100 py-4"
+                  key={folder.id}
+                  onPress={() => {
+                    if (picker?.type === 'card') {
+                      const card = cards.find((entry) => entry.id === picker.itemId);
+                      if (card) void handleMoveCard(card, folder.id);
+                    } else if (picker?.type === 'folder') {
+                      const source = folders.find((entry) => entry.id === picker.itemId);
+                      if (source) void handleMoveFolder(source, folder.id);
+                    }
+                    setPicker(null);
+                  }}
+                >
+                  <Text className="text-base text-neutral-900">{formatFolderLabel(folder, folders)}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <Pressable className="mt-4 items-center rounded-2xl bg-neutral-100 py-3" onPress={() => setPicker(null)}>
+              <Text className="font-semibold text-neutral-800">Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -530,15 +770,63 @@ function toCardRecord(note: {
   id: string;
   title: string;
   updatedAt: string;
-}) {
+}): DecryptedCard | null {
+  const organization = parseNoteOrganization(note.content);
+
+  if (organization.kind !== 'card') {
+    return null;
+  }
+
   return {
     createdAt: note.createdAt,
+    folderId: organization.folderId,
     id: note.id,
-    lastDoneAt: normalizeLastDoneAt(note.content),
+    lastDoneAt: organization.lastDoneAt,
     question: note.title,
     title: note.title,
     updatedAt: note.updatedAt,
   };
+}
+
+function toFolderRecord(note: {
+  content: string;
+  createdAt: string;
+  id: string;
+  title: string;
+  updatedAt: string;
+}): DecryptedFolder | null {
+  const organization = parseNoteOrganization(note.content);
+
+  if (organization.kind !== 'folder') {
+    return null;
+  }
+
+  return {
+    createdAt: note.createdAt,
+    id: note.id,
+    parentFolderId: organization.parentFolderId,
+    title: note.title,
+    updatedAt: note.updatedAt,
+  };
+}
+
+function toRecords(notes: Parameters<typeof toCardRecord>[0][]) {
+  const cards: DecryptedCard[] = [];
+  const folders: DecryptedFolder[] = [];
+
+  for (const note of notes) {
+    const card = toCardRecord(note);
+    if (card) {
+      cards.push(card);
+      continue;
+    }
+    const folder = toFolderRecord(note);
+    if (folder) {
+      folders.push(folder);
+    }
+  }
+
+  return { cards, folders };
 }
 
 function buildInitialCardSyncMessage(cardCount: number) {
@@ -561,14 +849,88 @@ function sortCards(cards: DecryptedCard[]) {
   return [...cards].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
-function normalizeLastDoneAt(value: string) {
-  const trimmedValue = value.trim();
+function sortFolders(folders: DecryptedFolder[]) {
+  return [...folders].sort((left, right) => {
+    const depthDifference = getFolderDepth(left.id, folders) - getFolderDepth(right.id, folders);
+    return depthDifference || left.title.localeCompare(right.title);
+  });
+}
 
-  if (!trimmedValue) {
-    return null;
+function upsertFolder(folders: DecryptedFolder[], savedFolder: DecryptedFolder) {
+  const existingIndex = folders.findIndex((folder) => folder.id === savedFolder.id);
+
+  if (existingIndex === -1) {
+    return [...folders, savedFolder];
   }
 
-  return Number.isNaN(Date.parse(trimmedValue)) ? null : trimmedValue;
+  return folders.map((folder) => folder.id === savedFolder.id ? savedFolder : folder);
+}
+
+function getFolderDepth(folderId: string, folders: DecryptedFolder[]) {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const visited = new Set<string>();
+  let depth = 1;
+  let parentId = byId.get(folderId)?.parentFolderId ?? null;
+
+  while (parentId && !visited.has(parentId)) {
+    visited.add(parentId);
+    depth += 1;
+    parentId = byId.get(parentId)?.parentFolderId ?? null;
+  }
+
+  return depth;
+}
+
+function canMoveFolder(folderId: string, parentFolderId: string | null, folders: DecryptedFolder[]) {
+  if (!parentFolderId) {
+    return true;
+  }
+  if (folderId === parentFolderId || isFolderDescendant(parentFolderId, folderId, folders)) {
+    return false;
+  }
+
+  const subtreeHeight = Math.max(
+    ...folders
+      .filter((folder) => folder.id === folderId || isFolderDescendant(folder.id, folderId, folders))
+      .map((folder) => getFolderDepth(folder.id, folders) - getFolderDepth(folderId, folders) + 1),
+  );
+
+  return getFolderDepth(parentFolderId, folders) + subtreeHeight <= MAX_FOLDER_DEPTH;
+}
+
+function isFolderDescendant(folderId: string, ancestorId: string, folders: DecryptedFolder[]) {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const visited = new Set<string>();
+  let parentId = byId.get(folderId)?.parentFolderId ?? null;
+
+  while (parentId && !visited.has(parentId)) {
+    if (parentId === ancestorId) {
+      return true;
+    }
+    visited.add(parentId);
+    parentId = byId.get(parentId)?.parentFolderId ?? null;
+  }
+
+  return false;
+}
+
+function formatFolderLabel(folder: DecryptedFolder, folders: DecryptedFolder[]) {
+  return `${'  '.repeat(Math.min(getFolderDepth(folder.id, folders) - 1, 6))}${folder.title}`;
+}
+
+function parseFolderDocument(value: string) {
+  try {
+    const parsed = JSON.parse(value) as Partial<{ name: unknown; parentFolderId: unknown; version: unknown }>;
+    if (parsed.version === 1 && typeof parsed.name === 'string') {
+      return {
+        name: parsed.name,
+        parentFolderId: typeof parsed.parentFolderId === 'string' && parsed.parentFolderId.trim() ? parsed.parentFolderId : null,
+      };
+    }
+  } catch {
+    // The folder payload is authenticated before this fallback is used.
+  }
+  throw new Error('The backend returned an invalid encrypted folder.');
 }
 
 function appendQuestionMark(question: string) {

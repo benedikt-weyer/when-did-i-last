@@ -6,10 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
-    domains::{
-        auth::AuthenticatedUser,
-        notes::repository,
-    },
+    domains::{auth::AuthenticatedUser, notes::repository},
     error::{AppError, AppResult},
 };
 
@@ -87,10 +84,10 @@ pub async fn list_notes(
         authenticated_user.owner_user_id,
         authenticated_user.principal_id,
     )
-        .await?
-        .into_iter()
-        .map(map_stored_note)
-        .collect())
+    .await?
+    .into_iter()
+    .map(map_stored_note)
+    .collect())
 }
 
 pub async fn get_note(
@@ -104,9 +101,9 @@ pub async fn get_note(
         authenticated_user.principal_id,
         note_id,
     )
-        .await?
-        .ok_or_else(|| AppError::not_found("note not found"))
-        .map(map_stored_note)
+    .await?
+    .ok_or_else(|| AppError::not_found("note not found"))
+    .map(map_stored_note)
 }
 
 pub async fn create_note(
@@ -117,7 +114,8 @@ pub async fn create_note(
     validate_payload(&command)?;
 
     let now = Utc::now().fixed_offset();
-    let event_recipient_ids = collect_recipient_ids(&command.encrypted_deks, authenticated_user.owner_user_id);
+    let event_recipient_ids =
+        collect_recipient_ids(&command.encrypted_deks, authenticated_user.owner_user_id);
     let transaction = state
         .db
         .begin()
@@ -165,7 +163,8 @@ pub async fn update_note(
 ) -> AppResult<StoredNote> {
     validate_payload(&command)?;
 
-    let next_recipient_ids = collect_recipient_ids(&command.encrypted_deks, authenticated_user.owner_user_id);
+    let next_recipient_ids =
+        collect_recipient_ids(&command.encrypted_deks, authenticated_user.owner_user_id);
     let transaction = state
         .db
         .begin()
@@ -256,8 +255,8 @@ pub async fn delete_note(
         authenticated_user.principal_id,
         note_id,
     )
-        .await?
-        .ok_or_else(|| AppError::not_found("note not found"))?;
+    .await?
+    .ok_or_else(|| AppError::not_found("note not found"))?;
     let recipient_ids = repository::list_note_recipient_ids(&transaction, note_id).await?;
     let occurred_at = Utc::now().fixed_offset().to_rfc3339();
 
@@ -295,7 +294,10 @@ fn collect_recipient_ids(
     owner_user_id: Uuid,
 ) -> Vec<Uuid> {
     merge_recipient_ids(
-        encrypted_deks.iter().map(|encrypted_dek| encrypted_dek.user_id).collect(),
+        encrypted_deks
+            .iter()
+            .map(|encrypted_dek| encrypted_dek.user_id)
+            .collect(),
         Vec::new(),
         owner_user_id,
     )
@@ -317,11 +319,13 @@ fn merge_recipient_ids(
     recipient_ids
 }
 
-fn validate_payload(payload: &SaveNoteCommand) -> AppResult<()> {
+pub fn validate_payload(payload: &SaveNoteCommand) -> AppResult<()> {
     validate_encrypted_blob(&payload.encrypted_payload, "encryptedPayload")?;
 
     if payload.encrypted_deks.is_empty() {
-        return Err(AppError::validation("encryptedDeks must contain at least one wrapped dek"));
+        return Err(AppError::validation(
+            "encryptedDeks must contain at least one wrapped dek",
+        ));
     }
 
     for encrypted_dek in &payload.encrypted_deks {
@@ -362,16 +366,21 @@ fn validate_encrypted_blob(payload: &SaveEncryptedBlobCommand, field_name: &str)
     }
 
     if payload.version != 1 {
-        return Err(AppError::validation(format!("{field_name}.version must be 1")));
+        return Err(AppError::validation(format!(
+            "{field_name}.version must be 1"
+        )));
     }
 
-    normalize_hex_field(&payload.ciphertext_hex, &format!("{field_name}.ciphertextHex"))?;
+    normalize_hex_field(
+        &payload.ciphertext_hex,
+        &format!("{field_name}.ciphertextHex"),
+    )?;
     normalize_hex_field(&payload.nonce_hex, &format!("{field_name}.nonceHex"))?;
 
     Ok(())
 }
 
-fn map_save_blob(payload: &SaveEncryptedBlobCommand) -> repository::EncryptedBlob {
+pub fn map_save_blob(payload: &SaveEncryptedBlobCommand) -> repository::EncryptedBlob {
     repository::EncryptedBlob {
         algorithm: payload.algorithm.trim().to_owned(),
         ciphertext_hex: payload.ciphertext_hex.trim().to_owned(),
@@ -380,7 +389,9 @@ fn map_save_blob(payload: &SaveEncryptedBlobCommand) -> repository::EncryptedBlo
     }
 }
 
-fn map_wrapped_deks(payloads: &[SaveWrappedDekCommand]) -> AppResult<Vec<repository::WrappedDek>> {
+pub fn map_wrapped_deks(
+    payloads: &[SaveWrappedDekCommand],
+) -> AppResult<Vec<repository::WrappedDek>> {
     payloads.iter().map(map_wrapped_dek).collect()
 }
 
@@ -388,7 +399,10 @@ fn map_wrapped_dek(payload: &SaveWrappedDekCommand) -> AppResult<repository::Wra
     Ok(repository::WrappedDek {
         algorithm: payload.algorithm.trim().to_owned(),
         kem_ciphertext_hex: payload.kem_ciphertext_hex.trim().to_ascii_lowercase(),
-        kek_public_key: normalize_kek_public_key_field(&payload.kek_public_key, "encryptedDeks.kekId")?,
+        kek_public_key: normalize_kek_public_key_field(
+            &payload.kek_public_key,
+            "encryptedDeks.kekId",
+        )?,
         nonce_hex: payload.nonce_hex.trim().to_owned(),
         user_id: payload.user_id,
         version: payload.version,
@@ -432,7 +446,11 @@ fn normalize_hex_field(value: &str, field_name: &str) -> AppResult<()> {
     Ok(())
 }
 
-fn normalize_exact_hex_field(value: &str, field_name: &str, expected_bytes: usize) -> AppResult<()> {
+fn normalize_exact_hex_field(
+    value: &str,
+    field_name: &str,
+    expected_bytes: usize,
+) -> AppResult<()> {
     let normalized = value.trim().to_ascii_lowercase();
 
     if normalized.is_empty() {

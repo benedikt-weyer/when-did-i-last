@@ -46,6 +46,7 @@ async fn main() -> AppResult<()> {
         .route("/health", get(domains::system::health))
         .nest("/api/auth", domains::auth::router())
         .nest("/api/cards", domains::notes::router())
+        .nest("/api/folders", domains::folders::router())
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());

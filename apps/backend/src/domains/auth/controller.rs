@@ -1,6 +1,6 @@
 use axum::{
-    http::StatusCode,
     extract::{Path, State},
+    http::StatusCode,
     routing::{delete, get, post},
     Json, Router,
 };
@@ -18,15 +18,21 @@ use crate::{
 
 pub fn router() -> Router<AppState> {
     Router::new()
-    .route("/linked-principals", get(linked_principals))
+        .route("/linked-principals", get(linked_principals))
         .route("/kek-status", get(kek_status))
         .route("/refresh", post(refresh))
         .route("/salt", post(salt))
         .route("/login", post(login))
-    .route("/api-users/login", post(api_user_login))
-    .route("/api-users", get(list_api_users).post(create_api_user))
-    .route("/api-users/{api_user_id}", get(get_api_user).delete(delete_api_user))
-    .route("/api-users/{api_user_id}/provision", post(provision_api_user_deks))
+        .route("/api-users/login", post(api_user_login))
+        .route("/api-users", get(list_api_users).post(create_api_user))
+        .route(
+            "/api-users/{api_user_id}",
+            get(get_api_user).delete(delete_api_user),
+        )
+        .route(
+            "/api-users/{api_user_id}/provision",
+            post(provision_api_user_deks),
+        )
         .route("/account", delete(delete_account))
         .route("/rotate-password", post(rotate_password))
         .route("/register", post(register))
@@ -469,9 +475,7 @@ fn map_principal_response(principal: service::PrincipalSummary) -> PrincipalResp
     }
 }
 
-fn map_linked_principal_response(
-    principal: service::LinkedPrincipal,
-) -> LinkedPrincipalResponse {
+fn map_linked_principal_response(principal: service::LinkedPrincipal) -> LinkedPrincipalResponse {
     LinkedPrincipalResponse {
         id: principal.id,
         kind: principal.kind,
