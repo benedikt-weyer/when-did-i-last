@@ -4,7 +4,9 @@
 
 ### `pnpm dev`
 
-Runs `turbo dev` from the repository root.
+Starts the local Postgres container, then runs `turbo dev` from the repository
+root. It uses port `5432` when available and otherwise selects the next free
+port, passing the matching database URL to the backend.
 
 Turbo will start every workspace that exposes a `dev` script. That means this
 is the broad monorepo entry point.

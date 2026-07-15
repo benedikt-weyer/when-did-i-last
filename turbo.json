@@ -5,7 +5,8 @@
     "ANDROID_SDK_ROOT",
     "ANDROID_NDK_ROOT",
     "JAVA_HOME",
-    "GRADLE_OPTS"
+    "GRADLE_OPTS",
+    "DATABASE_URL"
   ],
   "tasks": {
     "build": {

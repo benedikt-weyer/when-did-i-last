@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "install": "uv venv ../../.venv && uv pip install --python ../../.venv/bin/python --requirements requirements.txt",
+    "install": "uv venv --allow-existing ../../.venv && uv pip install --python ../../.venv/bin/python --requirements requirements.txt",
     "build": "uv run --python ../../.venv/bin/python --no-project mkdocs build --config-file mkdocs.yml --strict",
     "dev": "uv run --python ../../.venv/bin/python --no-project mkdocs serve --config-file mkdocs.yml --dev-addr 127.0.0.1:8000"
   }
