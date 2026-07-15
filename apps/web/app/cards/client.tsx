@@ -13,7 +13,7 @@ import {
   serializeCardOrganization,
 } from '@repo/offline-provider';
 import { decryptStringWithAsymmetricKek, encryptStringWithAsymmetricKeks } from '@repo/e2ee-auth/web';
-import { Check, FolderPlus, Pencil, Trash2, X } from 'lucide-react';
+import { Check, Folder, FolderPlus, Pencil, Trash2, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { fetchLinkedPrincipals } from '@/lib/auth-api';
@@ -22,7 +22,6 @@ import { fetchFolders, saveFolder } from '@/lib/folder-api';
 import {
   PageShell,
   SignedOutForm,
-  StatusPanel,
   panelClassName,
   useSessionPageState,
 } from '../shared/session-page';
@@ -35,7 +34,6 @@ import {
   buildInitialNoteSyncMessage,
   buildOfflineSyncFailureMessage,
   buildPostLoginNoteMessage,
-  formatTimestamp,
 } from '../shared/session-page-helpers';
 
 type DecryptedCard = {
@@ -61,8 +59,8 @@ export function CardsPageClient() {
   const [folders, setFolders] = useState<DecryptedFolder[]>([]);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [folderTitle, setFolderTitle] = useState('');
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const selectedCardIdRef = useRef<string | null>(null);
 
@@ -70,7 +68,6 @@ export function CardsPageClient() {
     const nextSelectedCardId = card?.id ?? null;
 
     selectedCardIdRef.current = nextSelectedCardId;
-    setSelectedCardId(nextSelectedCardId);
     setCardQuestion(card?.question ?? '');
   }, []);
 
@@ -311,7 +308,7 @@ export function CardsPageClient() {
 
     try {
       const newCard = toCardRecord(await webOfflineNotesProvider.saveNote({
-        content: serializeCardOrganization({ folderId: null, lastDoneAt: null }),
+        content: serializeCardOrganization({ folderId: currentFolderId, lastDoneAt: null }),
         title: '',
       }));
 
@@ -578,7 +575,10 @@ export function CardsPageClient() {
 
   async function handleCreateFolder() {
     try {
-      const savedFolder = await saveEncryptedFolder({ parentFolderId: null, title: '' });
+      if (currentFolderId && getFolderDepth(currentFolderId, folders) >= MAX_FOLDER_DEPTH) {
+        throw new Error(`Folders can be nested at most ${MAX_FOLDER_DEPTH} levels.`);
+      }
+      const savedFolder = await saveEncryptedFolder({ parentFolderId: currentFolderId, title: '' });
       setFolders((currentFolders) => upsertFolder(currentFolders, savedFolder));
       setFolderTitle('');
       setEditingFolderId(savedFolder.id);
@@ -587,6 +587,10 @@ export function CardsPageClient() {
       shared.setErrorMessage(error instanceof Error ? error.message : 'Unable to create the folder.');
     }
   }
+
+  const breadcrumbs = getFolderBreadcrumbs(currentFolderId, folders);
+  const visibleFolders = sortFolders(folders.filter((folder) => folder.parentFolderId === currentFolderId));
+  const visibleCards = cards.filter((card) => card.folderId === currentFolderId);
 
   function handleStartEditFolder(folder: DecryptedFolder) {
     setFolderTitle(folder.title);
@@ -647,7 +651,7 @@ export function CardsPageClient() {
           <div className={panelClassName} id="cards">
             <div className="flex flex-col gap-4 border-b border-border/60 pb-5 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                Cards ({cards.length})
+                Cards ({visibleCards.length})
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button onClick={handleCreateCard} size="lg" variant="outline">New card</Button>
@@ -658,34 +662,56 @@ export function CardsPageClient() {
               </div>
             </div>
 
-            {folders.length > 0 ? (
+            <nav aria-label="Folder path" className="mt-4 flex flex-wrap items-center gap-1 text-sm">
+              {currentFolderId ? (
+                <Button aria-label="Back to parent folder" onClick={() => setCurrentFolderId(breadcrumbs.at(-2)?.id ?? null)} size="icon" title="Back">
+                  <span aria-hidden="true">&larr;</span>
+                </Button>
+              ) : null}
+              <button className="rounded px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setCurrentFolderId(null)} type="button">Cards</button>
+              {breadcrumbs.map((folder) => (
+                <span className="flex items-center gap-1" key={folder.id}>
+                  <span className="text-muted-foreground">/</span>
+                  <button className="rounded px-2 py-1 hover:bg-muted" onClick={() => setCurrentFolderId(folder.id)} type="button">{folder.title || 'Untitled folder'}</button>
+                </span>
+              ))}
+            </nav>
+
+            {visibleFolders.length > 0 ? (
               <div className="mt-5 grid gap-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Folders</p>
-                {sortFolders(folders).map((folder) => (
+                {visibleFolders.map((folder) => (
                   <div
-                    className="grid gap-2 rounded-lg border border-border/60 bg-muted/35 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center"
+                    className="grid cursor-pointer gap-2 rounded-lg border border-border/60 bg-muted/35 px-3 py-3 hover:border-primary/50 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center"
                     key={folder.id}
-                    style={{ marginLeft: `${Math.min(getFolderDepth(folder.id, folders) - 1, 6) * 12}px` }}
+                    onClick={() => {
+                      if (folder.id !== editingFolderId) setCurrentFolderId(folder.id);
+                    }}
                   >
-                    {folder.id === editingFolderId ? (
-                      <input
-                        autoFocus
-                        className="min-w-0 rounded-md border border-border bg-background px-2 py-2 text-sm"
-                        onChange={(event) => setFolderTitle(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') void handleSaveFolder(folder);
-                          if (event.key === 'Escape') setEditingFolderId(null);
-                        }}
-                        placeholder="Folder name"
-                        value={folderTitle}
-                      />
-                    ) : (
-                      <span className="min-w-0 truncate text-sm font-medium text-foreground">{folder.title || 'Untitled folder'}</span>
-                    )}
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Folder aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                      {folder.id === editingFolderId ? (
+                        <input
+                          autoFocus
+                          className="min-w-0 rounded-md border border-border bg-background px-2 py-2 text-sm"
+                          onChange={(event) => setFolderTitle(event.target.value)}
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') void handleSaveFolder(folder);
+                            if (event.key === 'Escape') setEditingFolderId(null);
+                          }}
+                          placeholder="Folder name"
+                          value={folderTitle}
+                        />
+                      ) : (
+                        <span className="min-w-0 truncate text-sm font-medium text-foreground">{folder.title || 'Untitled folder'}</span>
+                      )}
+                    </div>
                     <select
                       aria-label={`Move folder ${folder.title}`}
                       className="rounded-md border border-border bg-background px-2 py-2 text-sm"
                       onChange={(event) => { void handleMoveFolder(folder, event.target.value || null); }}
+                      onClick={(event) => event.stopPropagation()}
                       value={folder.parentFolderId ?? ''}
                     >
                       <option value="">Top level</option>
@@ -696,11 +722,11 @@ export function CardsPageClient() {
                     <div className="flex gap-1 sm:col-start-2">
                       {folder.id === editingFolderId ? (
                         <>
-                          <Button aria-label="Save folder" onClick={() => { void handleSaveFolder(folder); }} size="icon" title="Save folder"><Check /></Button>
-                          <Button aria-label="Cancel editing folder" onClick={() => setEditingFolderId(null)} size="icon" title="Cancel editing folder" variant="outline"><X /></Button>
+                          <Button aria-label="Save folder" onClick={(event) => { event.stopPropagation(); void handleSaveFolder(folder); }} size="icon" title="Save folder"><Check /></Button>
+                          <Button aria-label="Cancel editing folder" onClick={(event) => { event.stopPropagation(); setEditingFolderId(null); }} size="icon" title="Cancel editing folder" variant="outline"><X /></Button>
                         </>
                       ) : (
-                        <Button aria-label="Edit folder" onClick={() => handleStartEditFolder(folder)} size="icon" title="Edit folder" variant="outline"><Pencil /></Button>
+                        <Button aria-label="Edit folder" onClick={(event) => { event.stopPropagation(); handleStartEditFolder(folder); }} size="icon" title="Edit folder" variant="outline"><Pencil /></Button>
                       )}
                     </div>
                   </div>
@@ -709,12 +735,12 @@ export function CardsPageClient() {
             ) : null}
 
             <div className="mt-5 grid gap-3">
-              {cards.length === 0 ? (
+              {visibleCards.length === 0 ? (
                 <p className="rounded-[1.4rem] border border-dashed border-border/70 bg-background/75 px-4 py-5 text-sm text-foreground/65">
-                  No encrypted cards yet.
+                  No encrypted cards in this folder yet.
                 </p>
               ) : (
-                cards.map((card) => {
+                visibleCards.map((card) => {
                   const isEditing = card.id === editingCardId;
 
                   return (
@@ -756,9 +782,6 @@ export function CardsPageClient() {
                         )}
                         <span className="text-xl font-semibold text-foreground/85">
                           {formatElapsedTime(card.lastDoneAt, now)}
-                        </span>
-                        <span className="text-xs uppercase tracking-[0.18em] text-foreground/45">
-                          Updated {formatTimestamp(card.updatedAt)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 self-start sm:self-center">
@@ -813,7 +836,6 @@ export function CardsPageClient() {
             </p>
           ) : null}
 
-          <StatusPanel selectedNoteId={selectedCardId} statusMessage={shared.statusMessage} />
         </div>
       ) : (
         <div className={panelClassName} id="auth">
@@ -933,6 +955,23 @@ function upsertFolder(folders: DecryptedFolder[], savedFolder: DecryptedFolder) 
   }
 
   return folders.map((folder) => folder.id === savedFolder.id ? savedFolder : folder);
+}
+
+function getFolderBreadcrumbs(folderId: string | null, folders: DecryptedFolder[]) {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const breadcrumbs: DecryptedFolder[] = [];
+  const visited = new Set<string>();
+  let currentId = folderId;
+
+  while (currentId && !visited.has(currentId)) {
+    const folder = byId.get(currentId);
+    if (!folder) break;
+    visited.add(currentId);
+    breadcrumbs.unshift(folder);
+    currentId = folder.parentFolderId;
+  }
+
+  return breadcrumbs;
 }
 
 function getFolderDepth(folderId: string, folders: DecryptedFolder[]) {

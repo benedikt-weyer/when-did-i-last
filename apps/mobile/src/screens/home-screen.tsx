@@ -54,6 +54,7 @@ export function HomeScreen() {
   const [folders, setFolders] = useState<DecryptedFolder[]>([]);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [folderTitle, setFolderTitle] = useState('');
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ itemId: string; type: 'card' | 'folder' } | null>(null);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const selectedCardIdRef = useRef<string | null>(null);
@@ -240,7 +241,7 @@ export function HomeScreen() {
     try {
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
       const newCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
-        content: serializeCardOrganization({ folderId: null, lastDoneAt: null }),
+        content: serializeCardOrganization({ folderId: currentFolderId, lastDoneAt: null }),
         title: '',
       }));
       if (!newCard) {
@@ -480,7 +481,10 @@ export function HomeScreen() {
 
   async function handleCreateFolder() {
     try {
-      const savedFolder = await saveEncryptedFolder({ parentFolderId: null, title: '' });
+      if (currentFolderId && getFolderDepth(currentFolderId, folders) >= MAX_FOLDER_DEPTH) {
+        throw new Error(`Folders can be nested at most ${MAX_FOLDER_DEPTH} levels.`);
+      }
+      const savedFolder = await saveEncryptedFolder({ parentFolderId: currentFolderId, title: '' });
       setFolders((currentFolders) => upsertFolder(currentFolders, savedFolder));
       setFolderTitle('');
       setEditingFolderId(savedFolder.id);
@@ -489,6 +493,10 @@ export function HomeScreen() {
       setStatusMessage(error instanceof Error ? error.message : 'Unable to create the folder.');
     }
   }
+
+  const breadcrumbs = getFolderBreadcrumbs(currentFolderId, folders);
+  const visibleFolders = sortFolders(folders.filter((folder) => folder.parentFolderId === currentFolderId));
+  const visibleCards = cards.filter((card) => card.folderId === currentFolderId);
 
   function handleStartEditFolder(folder: DecryptedFolder) {
     setFolderTitle(folder.title);
@@ -579,24 +587,48 @@ export function HomeScreen() {
             </Pressable>
           </View>
 
-          {folders.length > 0 ? (
+          <View className="flex-row flex-wrap items-center gap-1 px-1 py-2">
+            {currentFolderId ? (
+              <Pressable accessibilityLabel="Back to parent folder" className="rounded-lg bg-white px-3 py-2" onPress={() => setCurrentFolderId(breadcrumbs.at(-2)?.id ?? null)}>
+                <Ionicons color="#262626" name="arrow-back" size={18} />
+              </Pressable>
+            ) : null}
+            <Pressable onPress={() => setCurrentFolderId(null)}>
+              <Text className="px-1 text-sm text-neutral-700">Cards</Text>
+            </Pressable>
+            {breadcrumbs.map((folder) => (
+              <View className="flex-row items-center" key={folder.id}>
+                <Text className="px-1 text-sm text-neutral-500">/</Text>
+                <Pressable onPress={() => setCurrentFolderId(folder.id)}>
+                  <Text className="px-1 text-sm font-medium text-neutral-900">{folder.title || 'Untitled folder'}</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+
+          {visibleFolders.length > 0 ? (
             <View className="gap-2">
               <Text className="mt-2 text-xs font-semibold uppercase tracking-[1.5px] text-neutral-600">Folders</Text>
-              {sortFolders(folders).map((folder) => (
-                <View className="flex-row items-center justify-between rounded-[18px] bg-[#e9edf1] px-4 py-3" key={folder.id} style={{ marginLeft: Math.min(getFolderDepth(folder.id, folders) - 1, 5) * 10 }}>
-                  {folder.id === editingFolderId ? (
-                    <TextInput
-                      autoFocus
-                      className="max-w-[62%] grow border-b border-neutral-300 py-1 text-base text-neutral-900"
-                      onChangeText={setFolderTitle}
-                      onSubmitEditing={() => { void handleSaveFolder(folder); }}
-                      placeholder="Folder name"
-                      placeholderTextColor="#6b7280"
-                      value={folderTitle}
-                    />
-                  ) : (
-                    <Text className="max-w-[62%] text-base font-semibold text-neutral-900" numberOfLines={1}>{folder.title || 'Untitled folder'}</Text>
-                  )}
+              {visibleFolders.map((folder) => (
+                <Pressable className="flex-row items-center justify-between rounded-[18px] bg-[#e9edf1] px-4 py-3" key={folder.id} onPress={() => {
+                  if (folder.id !== editingFolderId) setCurrentFolderId(folder.id);
+                }}>
+                  <View className="max-w-[62%] flex-row items-center gap-2">
+                    <Ionicons color="#404040" name="folder-outline" size={20} />
+                    {folder.id === editingFolderId ? (
+                      <TextInput
+                        autoFocus
+                        className="grow border-b border-neutral-300 py-1 text-base text-neutral-900"
+                        onChangeText={setFolderTitle}
+                        onSubmitEditing={() => { void handleSaveFolder(folder); }}
+                        placeholder="Folder name"
+                        placeholderTextColor="#6b7280"
+                        value={folderTitle}
+                      />
+                    ) : (
+                      <Text className="shrink text-base font-semibold text-neutral-900" numberOfLines={1}>{folder.title || 'Untitled folder'}</Text>
+                    )}
+                  </View>
                   <Pressable accessibilityLabel={`Move folder ${folder.title}`} className="rounded-xl bg-white px-3 py-2" onPress={() => setPicker({ itemId: folder.id, type: 'folder' })}>
                     <Text className="text-xs font-semibold text-neutral-800">Move</Text>
                   </Pressable>
@@ -609,17 +641,17 @@ export function HomeScreen() {
                       <Ionicons color="#262626" name="pencil-outline" size={20} />
                     </Pressable>
                   )}
-                </View>
+                </Pressable>
               ))}
             </View>
           ) : null}
 
-          {cards.length === 0 ? (
+          {visibleCards.length === 0 ? (
             <Text className="rounded-[24px] bg-white px-5 py-5 text-sm text-neutral-700">
-              No encrypted cards yet.
+              No encrypted cards in this folder yet.
             </Text>
           ) : (
-            cards.map((card) => {
+            visibleCards.map((card) => {
               const isEditing = card.id === editingCardId;
 
               return (
@@ -864,6 +896,23 @@ function upsertFolder(folders: DecryptedFolder[], savedFolder: DecryptedFolder) 
   }
 
   return folders.map((folder) => folder.id === savedFolder.id ? savedFolder : folder);
+}
+
+function getFolderBreadcrumbs(folderId: string | null, folders: DecryptedFolder[]) {
+  const byId = new Map(folders.map((folder) => [folder.id, folder]));
+  const breadcrumbs: DecryptedFolder[] = [];
+  const visited = new Set<string>();
+  let currentId = folderId;
+
+  while (currentId && !visited.has(currentId)) {
+    const folder = byId.get(currentId);
+    if (!folder) break;
+    visited.add(currentId);
+    breadcrumbs.unshift(folder);
+    currentId = folder.parentFolderId;
+  }
+
+  return breadcrumbs;
 }
 
 function getFolderDepth(folderId: string, folders: DecryptedFolder[]) {
