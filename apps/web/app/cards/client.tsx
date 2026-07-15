@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react';
 import { subscribeToNoteEvents } from '@repo/realtime';
+import { Check, Pencil, Trash2, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 
@@ -40,6 +41,7 @@ type DecryptedCard = {
 export function CardsPageClient() {
   const [cardQuestion, setCardQuestion] = useState('');
   const [cards, setCards] = useState<DecryptedCard[]>([]);
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const selectedCardIdRef = useRef<string | null>(null);
@@ -270,39 +272,77 @@ export function CardsPageClient() {
     setStatusMessage,
   ]);
 
-  function handleCreateCard() {
+  async function handleCreateCard() {
     shared.setErrorMessage(null);
-    applySelectedCard(null);
-    shared.setStatusMessage('Creating a new encrypted card draft.');
+
+    try {
+      const newCard = toCardRecord(await webOfflineNotesProvider.saveNote({
+        content: '',
+        title: '',
+      }));
+
+      setCards((currentCards) => sortCards([...currentCards, newCard]));
+      applySelectedCard(newCard);
+      setEditingCardId(newCard.id);
+
+      if (!shared.session || shared.linkedKeks.length === 0 || !shared.backendUrl.trim()) {
+        shared.setStatusMessage('Created a new encrypted card locally. Sync pending.');
+        return;
+      }
+
+      try {
+        const syncedCards = sortCards((await syncOfflineNotes({
+          linkedKeks: shared.linkedKeks,
+          nextSession: shared.session,
+          runWithSessionRetry: shared.runWithSessionRetry,
+          trimmedBackendUrl: shared.backendUrl.trim(),
+        })).map(toCardRecord));
+
+        setCards(syncedCards);
+        shared.setStatusMessage('Created a new encrypted card.');
+      } catch (error) {
+        shared.setErrorMessage(
+          error instanceof Error ? error.message : 'Unable to sync the encrypted card.',
+        );
+        shared.setStatusMessage('Created a new encrypted card locally. Sync pending.');
+      }
+    } catch (error) {
+      shared.setErrorMessage(
+        error instanceof Error ? error.message : 'Unable to create the encrypted card.',
+      );
+    }
   }
 
-  function handleSelectCard(cardId: string) {
-    const nextCard = cards.find((card) => card.id === cardId) ?? null;
-
-    applySelectedCard(nextCard);
-    shared.setStatusMessage(nextCard ? `Selected "${nextCard.question || 'Untitled card'}".` : '');
+  function handleStartEdit(card: DecryptedCard) {
+    applySelectedCard(card);
+    setEditingCardId(card.id);
+    shared.setErrorMessage(null);
   }
 
-  async function handleSaveCard() {
-    const trimmedQuestion = cardQuestion.trim();
+  function handleCancelEdit(card: DecryptedCard) {
+    setCardQuestion(card.question);
+    setEditingCardId(null);
+  }
 
-    if (!trimmedQuestion) {
-      shared.setErrorMessage('Enter a question before saving the card.');
+  async function handleSaveCard(cardId: string) {
+    const selectedCard = cards.find((card) => card.id === cardId) ?? null;
+
+    if (!selectedCard) {
       return;
     }
 
     shared.setErrorMessage(null);
 
     try {
-      const selectedCard = cards.find((card) => card.id === selectedCardId) ?? null;
       const savedCard = toCardRecord(await webOfflineNotesProvider.saveNote({
         content: selectedCard?.lastDoneAt ?? '',
-        id: selectedCardId ?? undefined,
-        title: trimmedQuestion,
+        id: selectedCard.id,
+        title: cardQuestion.trim(),
       }));
-      const actionLabel = selectedCardId ? 'Updated' : 'Created';
+      const actionLabel = 'Updated';
 
       applySelectedCard(savedCard);
+      setEditingCardId(null);
 
       if (!shared.session || shared.linkedKeks.length === 0 || !shared.backendUrl.trim()) {
         shared.setStatusMessage(
@@ -336,19 +376,20 @@ export function CardsPageClient() {
     }
   }
 
-  async function handleDeleteCard() {
-    if (!selectedCardId) {
-      applySelectedCard(null);
-      shared.setStatusMessage('Cleared the local card draft.');
-      return;
-    }
-
+  async function handleDeleteCard(cardId: string) {
     shared.setErrorMessage(null);
 
     try {
-      const deletedCard = cards.find((card) => card.id === selectedCardId) ?? null;
+      const deletedCard = cards.find((card) => card.id === cardId) ?? null;
 
-      await webOfflineNotesProvider.deleteNote(selectedCardId);
+      await webOfflineNotesProvider.deleteNote(cardId);
+      setCards((currentCards) => currentCards.filter((card) => card.id !== cardId));
+      if (selectedCardIdRef.current === cardId) {
+        applySelectedCard(null);
+      }
+      if (editingCardId === cardId) {
+        setEditingCardId(null);
+      }
 
       if (!shared.session || shared.linkedKeks.length === 0 || !shared.backendUrl.trim()) {
         shared.setStatusMessage(
@@ -451,86 +492,84 @@ export function CardsPageClient() {
                 </p>
               ) : (
                 cards.map((card) => {
-                  const isActive = card.id === selectedCardId;
+                  const isEditing = card.id === editingCardId;
 
                   return (
                     <div
                       className={`grid gap-3 rounded-[1.5rem] border px-4 py-4 transition sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${
-                        isActive
+                        isEditing
                           ? 'border-primary/60 bg-card shadow-sm ring-1 ring-primary/15'
                           : 'border-border/60 bg-card/85 hover:border-border hover:bg-card'
                       }`}
                       key={card.id}
                     >
-                      <button
-                        className="grid gap-3 text-left"
-                        onClick={() => handleSelectCard(card.id)}
-                        type="button"
-                      >
-                        <span className="text-lg text-foreground">{appendQuestionMark(card.question)}</span>
+                      <div className="grid gap-3">
+                        {isEditing ? (
+                          <label className="flex items-center rounded-[1.5rem] border border-border bg-background/80 px-2 py-1 transition focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/20">
+                            <input
+                              autoComplete="off"
+                              autoFocus
+                              className="min-w-0 grow bg-transparent px-3 py-3 text-base text-foreground outline-none"
+                              onChange={(event) => setCardQuestion(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  event.preventDefault();
+                                  void handleSaveCard(card.id);
+                                }
+                                if (event.key === 'Escape') {
+                                  handleCancelEdit(card);
+                                }
+                              }}
+                              placeholder="water the plants"
+                              type="text"
+                              value={cardQuestion}
+                            />
+                            <span className="rounded-full bg-muted px-3 py-2 text-lg font-semibold text-foreground/70">
+                              ?
+                            </span>
+                          </label>
+                        ) : (
+                          <span className="text-lg text-foreground">{appendQuestionMark(card.question)}</span>
+                        )}
                         <span className="text-xl font-semibold text-foreground/85">
                           {formatElapsedTime(card.lastDoneAt, now)}
                         </span>
                         <span className="text-xs uppercase tracking-[0.18em] text-foreground/45">
                           Updated {formatTimestamp(card.updatedAt)}
                         </span>
-                      </button>
-                      <Button
-                        onClick={() => {
-                          void handleMarkNow(card.id);
-                        }}
-                        size="sm"
-                        variant="outline"
-                      >
-                        Now
-                      </Button>
+                      </div>
+                      <div className="flex items-center gap-2 self-start sm:self-center">
+                        {isEditing ? (
+                          <>
+                            <Button aria-label="Save card" onClick={() => { void handleSaveCard(card.id); }} size="icon" title="Save card">
+                              <Check />
+                            </Button>
+                            <Button aria-label="Cancel editing" onClick={() => handleCancelEdit(card)} size="icon" title="Cancel editing" variant="outline">
+                              <X />
+                            </Button>
+                          </>
+                        ) : (
+                          <Button aria-label="Edit card" onClick={() => handleStartEdit(card)} size="icon" title="Edit card" variant="outline">
+                            <Pencil />
+                          </Button>
+                        )}
+                        <Button
+                          aria-label="Mark card as done now"
+                          onClick={() => { void handleMarkNow(card.id); }}
+                          size="sm"
+                          title="Mark as done now"
+                          variant="outline"
+                        >
+                          Now
+                        </Button>
+                        <Button aria-label="Remove card" onClick={() => { void handleDeleteCard(card.id); }} size="icon" title="Remove card" variant="ghost">
+                          <Trash2 />
+                        </Button>
+                      </div>
                     </div>
                   );
                 })
               )}
-            </div>
-          </div>
-
-          <div className={panelClassName} id="editor">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-              Editor
-            </p>
-            <label className="grid gap-2">
-              <span className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                When did I last...
-              </span>
-              <div className="flex items-center rounded-[1.5rem] border border-border bg-background/80 px-2 py-1 transition focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/20">
-                <input
-                  autoComplete="off"
-                  className="min-w-0 grow bg-transparent px-3 py-3 text-base text-foreground outline-none"
-                  onChange={(event) => setCardQuestion(event.target.value)}
-                  placeholder="water the plants"
-                  type="text"
-                  value={cardQuestion}
-                />
-                <span className="rounded-full bg-muted px-3 py-2 text-lg font-semibold text-foreground/70">
-                  ?
-                </span>
-              </div>
-            </label>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Button
-                onClick={() => {
-                  void handleSaveCard();
-                }}
-                size="lg"
-              >
-                {selectedCardId ? 'Save card' : 'Create card'}
-              </Button>
-              <Button
-                onClick={() => {
-                  void handleDeleteCard();
-                }}
-                size="lg"
-                variant="outline"
-              >
-                {selectedCardId ? 'Delete card' : 'Clear draft'}
-              </Button>
             </div>
           </div>
 

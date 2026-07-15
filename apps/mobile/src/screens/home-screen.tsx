@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { subscribeToNoteEvents } from '@repo/realtime';
+import { Ionicons } from '@expo/vector-icons';
 
 import {
   createMobileOfflineNotesSyncAdapter,
@@ -19,6 +20,10 @@ type DecryptedCard = {
   updatedAt: string;
 };
 
+// Expo resolves bundled image assets through require at runtime.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const logo = require('../../assets/when-did-i-last-logo-bg-s.png');
+
 export function HomeScreen() {
   const {
     activeKekId,
@@ -30,7 +35,7 @@ export function HomeScreen() {
   } = useAuth();
   const [cardQuestion, setCardQuestion] = useState('');
   const [cards, setCards] = useState<DecryptedCard[]>([]);
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const selectedCardIdRef = useRef<string | null>(null);
   const isMountedRef = useRef(true);
   const [statusMessage, setStatusMessage] = useState('');
@@ -202,41 +207,75 @@ export function HomeScreen() {
 
   function applySelectedCard(card: DecryptedCard | null) {
     selectedCardIdRef.current = card?.id ?? null;
-    setSelectedCardId(card?.id ?? null);
     setCardQuestion(card?.question ?? '');
   }
 
-  function handleCreateCard() {
-    applySelectedCard(null);
-    setStatusMessage('Creating a new encrypted card draft.');
+  async function handleCreateCard() {
+    try {
+      const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
+      const newCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
+        content: '',
+        title: '',
+      }));
+
+      setCards((currentCards) => sortCards([...currentCards, newCard]));
+      applySelectedCard(newCard);
+      setEditingCardId(newCard.id);
+
+      if (!session || linkedKeks.length === 0 || !activeKekId) {
+        setStatusMessage('Created a new encrypted card locally. Sync pending.');
+        return;
+      }
+
+      try {
+        await syncOfflineNotes({
+          activeLinkedKekId: activeKekId,
+          linkedKeks,
+          nextSession: session,
+        });
+        setStatusMessage('Created a new encrypted card.');
+      } catch (error) {
+        setStatusMessage(
+          error instanceof Error
+            ? `Created a new encrypted card locally. ${error.message}`
+            : 'Created a new encrypted card locally. Sync pending.',
+        );
+      }
+    } catch (error) {
+      setStatusMessage(
+        error instanceof Error ? error.message : 'Unable to create the encrypted card.',
+      );
+    }
   }
 
-  function handleSelectCard(cardId: string) {
-    const nextCard = cards.find((card) => card.id === cardId) ?? null;
-
-    applySelectedCard(nextCard);
-    setStatusMessage(nextCard ? `Selected "${nextCard.question || 'Untitled card'}".` : '');
+  function handleStartEdit(card: DecryptedCard) {
+    applySelectedCard(card);
+    setEditingCardId(card.id);
   }
 
-  async function handleSaveCard() {
-    const trimmedQuestion = cardQuestion.trim();
+  function handleCancelEdit(card: DecryptedCard) {
+    setCardQuestion(card.question);
+    setEditingCardId(null);
+  }
 
-    if (!trimmedQuestion) {
-      setStatusMessage('Enter a question before saving the card.');
+  async function handleSaveCard(cardId: string) {
+    const selectedCard = cards.find((card) => card.id === cardId) ?? null;
+
+    if (!selectedCard) {
       return;
     }
 
     try {
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
-      const selectedCard = cards.find((card) => card.id === selectedCardId) ?? null;
       const savedCard = toCardRecord(await mobileOfflineNotesProvider.saveNote({
         content: selectedCard?.lastDoneAt ?? '',
-        id: selectedCardId ?? undefined,
-        title: trimmedQuestion,
+        id: selectedCard.id,
+        title: cardQuestion.trim(),
       }));
-      const actionLabel = selectedCardId ? 'Updated' : 'Created';
+      const actionLabel = 'Updated';
 
       applySelectedCard(savedCard);
+      setEditingCardId(null);
 
       if (!session || linkedKeks.length === 0 || !activeKekId) {
         setStatusMessage(
@@ -266,18 +305,19 @@ export function HomeScreen() {
     }
   }
 
-  async function handleDeleteCard() {
-    if (!selectedCardId) {
-      applySelectedCard(null);
-      setStatusMessage('Cleared the local card draft.');
-      return;
-    }
-
+  async function handleDeleteCard(cardId: string) {
     try {
-      const deletedCard = cards.find((card) => card.id === selectedCardId) ?? null;
+      const deletedCard = cards.find((card) => card.id === cardId) ?? null;
       const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
 
-      await mobileOfflineNotesProvider.deleteNote(selectedCardId);
+      await mobileOfflineNotesProvider.deleteNote(cardId);
+      setCards((currentCards) => currentCards.filter((card) => card.id !== cardId));
+      if (selectedCardIdRef.current === cardId) {
+        applySelectedCard(null);
+      }
+      if (editingCardId === cardId) {
+        setEditingCardId(null);
+      }
 
       if (!session || linkedKeks.length === 0 || !activeKekId) {
         setStatusMessage(`Deleted "${deletedCard?.question || 'Untitled card'}" locally. Sync pending.`);
@@ -365,7 +405,7 @@ export function HomeScreen() {
       >
         <View className="items-center pb-6 pt-4">
           <Image
-            source={require('../../assets/when-did-i-last-logo-bg-s.png')}
+            source={logo}
             style={{ height: 88, width: 88 }}
           />
           <Text className="mt-5 text-center text-4xl font-semibold text-neutral-800">
@@ -394,79 +434,91 @@ export function HomeScreen() {
             </Text>
           ) : (
             cards.map((card) => {
-              const isActive = card.id === selectedCardId;
+              const isEditing = card.id === editingCardId;
 
               return (
-                <View className="flex-row items-stretch gap-3" key={card.id}>
-                  <Pressable
-                    className={`grow rounded-[24px] border bg-white px-5 py-4 ${isActive ? 'border-neutral-800' : 'border-transparent'}`}
-                    onPress={() => {
-                      handleSelectCard(card.id);
-                    }}
-                  >
+                <View
+                  className={`rounded-[24px] border bg-white px-5 py-4 ${isEditing ? 'border-neutral-800' : 'border-transparent'}`}
+                  key={card.id}
+                >
+                  {isEditing ? (
+                    <View className="flex-row items-center rounded-2xl bg-neutral-100 px-1 py-1">
+                      <TextInput
+                        autoCapitalize="sentences"
+                        autoFocus
+                        className="grow px-3 py-3 text-base text-neutral-900"
+                        onChangeText={setCardQuestion}
+                        onSubmitEditing={() => {
+                          void handleSaveCard(card.id);
+                        }}
+                        placeholder="water the plants"
+                        placeholderTextColor="#6b7280"
+                        returnKeyType="done"
+                        value={cardQuestion}
+                      />
+                      <View className="mr-2 rounded-full bg-white px-3 py-2">
+                        <Text className="text-lg font-semibold text-neutral-700">?</Text>
+                      </View>
+                    </View>
+                  ) : (
                     <Text className="text-base text-neutral-900">
                       {appendQuestionMark(card.question)}
                     </Text>
+                  )}
                     <View className="my-3 h-px bg-neutral-200" />
                     <Text className="text-lg font-semibold text-neutral-800">
                       {formatElapsedTime(card.lastDoneAt, now)}
                     </Text>
-                  </Pressable>
-                  <Pressable
-                    className="self-center rounded-2xl bg-white px-4 py-4"
-                    onPress={() => {
-                      void handleMarkNow(card.id);
-                    }}
-                  >
-                    <Text className="font-semibold text-neutral-800">Now</Text>
-                  </Pressable>
+                  <View className="mt-4 flex-row items-center justify-end gap-2">
+                    {isEditing ? (
+                      <>
+                        <Pressable
+                          accessibilityLabel="Save card"
+                          className="rounded-2xl bg-neutral-900 p-3"
+                          onPress={() => { void handleSaveCard(card.id); }}
+                        >
+                          <Ionicons color="#ffffff" name="checkmark" size={20} />
+                        </Pressable>
+                        <Pressable
+                          accessibilityLabel="Cancel editing"
+                          className="rounded-2xl bg-neutral-100 p-3"
+                          onPress={() => handleCancelEdit(card)}
+                        >
+                          <Ionicons color="#262626" name="close" size={20} />
+                        </Pressable>
+                      </>
+                    ) : (
+                      <Pressable
+                        accessibilityLabel="Edit card"
+                        className="rounded-2xl bg-neutral-100 p-3"
+                        onPress={() => handleStartEdit(card)}
+                      >
+                        <Ionicons color="#262626" name="pencil-outline" size={20} />
+                      </Pressable>
+                    )}
+                    <Pressable
+                      accessibilityLabel="Mark card as done now"
+                      className="rounded-2xl bg-neutral-100 px-4 py-3"
+                      onPress={() => { void handleMarkNow(card.id); }}
+                    >
+                      <Text className="font-semibold text-neutral-800">Now</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="Remove card"
+                      className="rounded-2xl bg-red-50 p-3"
+                      onPress={() => { void handleDeleteCard(card.id); }}
+                    >
+                      <Ionicons color="#c2410c" name="trash-outline" size={20} />
+                    </Pressable>
+                  </View>
                 </View>
               );
             })
           )}
         </View>
-
-        <View className="mt-6 gap-3">
-          <Text className="text-base font-medium text-neutral-800">When did I last...</Text>
-          <View className="flex-row items-center rounded-[24px] bg-white px-1 py-1">
-            <TextInput
-              autoCapitalize="sentences"
-              className="grow px-4 py-4 text-base text-neutral-900"
-              onChangeText={setCardQuestion}
-              placeholder="water the plants"
-              placeholderTextColor="#6b7280"
-              value={cardQuestion}
-            />
-            <View className="mr-3 rounded-full bg-neutral-100 px-3 py-2">
-              <Text className="text-lg font-semibold text-neutral-700">?</Text>
-            </View>
-          </View>
-          <View className="flex-row gap-3">
-            <Pressable
-              className="items-center justify-center rounded-2xl bg-[#f54848] px-4 py-4"
-              onPress={() => {
-                void handleDeleteCard();
-              }}
-            >
-              <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-white">
-                {selectedCardId ? 'Delete' : 'Clear'}
-              </Text>
-            </Pressable>
-            <Pressable
-              className="flex-1 items-center rounded-2xl bg-[#111111] px-4 py-4"
-              onPress={() => {
-                void handleSaveCard();
-              }}
-            >
-              <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-white">
-                {selectedCardId ? 'Save card' : 'Create card'}
-              </Text>
-            </Pressable>
-          </View>
-          {statusMessage ? (
-            <Text className="text-sm leading-6 text-neutral-700">{statusMessage}</Text>
-          ) : null}
-        </View>
+        {statusMessage ? (
+          <Text className="mt-6 text-sm leading-6 text-neutral-700">{statusMessage}</Text>
+        ) : null}
       </ScrollView>
     </View>
   );
