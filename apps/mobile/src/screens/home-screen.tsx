@@ -2,7 +2,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Image, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { subscribeToNoteEvents } from '@repo/realtime';
-import { Ionicons } from '@expo/vector-icons';
+import { ArrowLeft, ChartNoAxesColumnIncreasing, Check, Folder, FolderOpen, Pencil, Trash2, UserRound, X } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import {
   MAX_FOLDER_DEPTH,
   parseNoteOrganization,
@@ -17,6 +18,7 @@ import { deleteFolder, fetchFolders, saveFolder } from '../features/e2ee/folder-
 import { getNativeAuthModule } from '../features/e2ee/native-runtime';
 import { useAuth } from '../features/auth/auth-context';
 import type { AuthApiResponse } from '../features/auth/auth-api';
+import { useAppTheme } from '../features/theme/theme-context';
 
 type DecryptedCard = {
   createdAt: string;
@@ -50,11 +52,18 @@ const historyResolutions: Array<{ label: string; value: HistoryResolution }> = [
   { label: 'D', value: 'day' }, { label: 'H', value: 'hour' }, { label: 'Min', value: 'minute' },
 ];
 
+const homeColors = {
+  dark: { background: '#242217', border: '#514c39', danger: '#f2a7a0', dangerSurface: '#4a2524', muted: '#d8d3b8', mutedSurface: '#363428', primary: '#d6cf98', primaryText: '#242217', surface: '#2f2d24', text: '#f3efdc' },
+  light: { background: '#F5EFB9', border: '#e1d99d', danger: '#c2410c', dangerSurface: '#fef2f2', muted: '#52525b', mutedSurface: '#e9edf1', primary: '#47474d', primaryText: '#ffffff', surface: '#ffffff', text: '#262626' },
+};
+
 // Expo resolves bundled image assets through require at runtime.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const logo = require('../../assets/when-did-i-last-logo-bg-s.png');
 
 export function HomeScreen() {
+  const { themeMode } = useAppTheme();
+  const router = useRouter();
   const {
     activeKekId,
     backendUrl,
@@ -63,6 +72,7 @@ export function HomeScreen() {
     runWithFreshSession,
     session,
   } = useAuth();
+  const colors = homeColors[themeMode];
   const [cardQuestion, setCardQuestion] = useState('');
   const [cards, setCards] = useState<DecryptedCard[]>([]);
   const [folders, setFolders] = useState<DecryptedFolder[]>([]);
@@ -74,7 +84,7 @@ export function HomeScreen() {
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const selectedCardIdRef = useRef<string | null>(null);
   const isMountedRef = useRef(true);
-  const [statusMessage, setStatusMessage] = useState('');
+  const [, setStatusMessage] = useState('');
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -604,8 +614,8 @@ export function HomeScreen() {
   }
 
   return (
-    <View className="flex-1 bg-[#F5EFB9]">
-      <StatusBar style="dark" />
+    <View className="flex-1" style={{ backgroundColor: colors.background }}>
+      <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
       <ScrollView
         className="flex-1"
         contentContainerStyle={{
@@ -616,43 +626,51 @@ export function HomeScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <View className="items-center pb-6 pt-4">
-          <Image
-            source={logo}
-            style={{ height: 88, width: 88 }}
-          />
-          <Text className="mt-5 text-center text-4xl font-semibold text-neutral-800">
-            When did I last...
-          </Text>
-          <Text className="mt-2 text-sm text-neutral-700">
-            Signed in as {session?.user.email ?? 'unknown'}
-          </Text>
+        <View className="w-full items-start pb-6 pt-4">
+          <View className="self-stretch flex-row items-center">
+            <View className="flex-row items-center gap-3">
+              <View className="overflow-hidden rounded-xl" style={{ backgroundColor: colors.surface }}>
+                <Image source={logo} style={{ height: 44, width: 44 }} />
+              </View>
+              <Text className="text-2xl font-semibold" style={{ color: colors.text }}>
+                When Did I Last
+              </Text>
+            </View>
+            <Pressable
+              accessibilityLabel="Open account settings"
+              className="ml-auto rounded-xl p-3"
+              onPress={() => router.push('/account-settings')}
+              style={{ backgroundColor: colors.surface }}
+            >
+              <UserRound color={colors.text} size={20} />
+            </Pressable>
+          </View>
         </View>
 
         <View className="gap-3">
           <View className="flex-row gap-3">
-            <Pressable className="flex-1 items-center rounded-full bg-[#47474d] px-4 py-4" onPress={() => { void handleCreateCard(); }}>
-              <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-white">New card</Text>
+            <Pressable className="flex-1 items-center rounded-full border px-4 py-4" onPress={() => { void handleCreateCard(); }} style={{ backgroundColor: themeMode === 'dark' ? colors.surface : colors.primary, borderColor: themeMode === 'dark' ? colors.border : colors.primary }}>
+              <Text className="text-sm font-semibold uppercase tracking-[1.5px]" style={{ color: themeMode === 'dark' ? colors.text : colors.primaryText }}>New card</Text>
             </Pressable>
-            <Pressable className="flex-1 items-center rounded-full bg-[#202d47] px-4 py-4" onPress={() => { void handleCreateFolder(); }}>
-              <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-white">New folder</Text>
+            <Pressable className="flex-1 items-center rounded-full px-4 py-4" onPress={() => { void handleCreateFolder(); }} style={{ backgroundColor: colors.primary }}>
+              <Text className="text-sm font-semibold uppercase tracking-[1.5px]" style={{ color: colors.primaryText }}>New folder</Text>
             </Pressable>
           </View>
 
           <View className="flex-row flex-wrap items-center gap-1 px-1 py-2">
             {currentFolderId ? (
-              <Pressable accessibilityLabel="Back to parent folder" className="rounded-lg bg-white px-3 py-2" onPress={() => setCurrentFolderId(breadcrumbs.at(-2)?.id ?? null)}>
-                <Ionicons color="#262626" name="arrow-back" size={18} />
+              <Pressable accessibilityLabel="Back to parent folder" className="rounded-lg px-3 py-2" onPress={() => setCurrentFolderId(breadcrumbs.at(-2)?.id ?? null)} style={{ backgroundColor: colors.surface }}>
+                <ArrowLeft color={colors.text} size={18} />
               </Pressable>
             ) : null}
             <Pressable onPress={() => setCurrentFolderId(null)}>
-              <Text className="px-1 text-sm text-neutral-700">Cards</Text>
+              <Text className="px-1 text-sm" style={{ color: colors.muted }}>Cards</Text>
             </Pressable>
             {breadcrumbs.map((folder) => (
               <View className="flex-row items-center" key={folder.id}>
-                <Text className="px-1 text-sm text-neutral-500">/</Text>
+                <Text className="px-1 text-sm" style={{ color: colors.muted }}>/</Text>
                 <Pressable onPress={() => setCurrentFolderId(folder.id)}>
-                  <Text className="px-1 text-sm font-medium text-neutral-900">{folder.title || 'Untitled folder'}</Text>
+                  <Text className="px-1 text-sm font-medium" style={{ color: colors.text }}>{folder.title || 'Untitled folder'}</Text>
                 </Pressable>
               </View>
             ))}
@@ -660,49 +678,52 @@ export function HomeScreen() {
 
           {visibleFolders.length > 0 ? (
             <View className="gap-2">
-              <Text className="mt-2 text-xs font-semibold uppercase tracking-[1.5px] text-neutral-600">Folders</Text>
+              <Text className="mt-2 text-xs font-semibold uppercase tracking-[1.5px]" style={{ color: colors.muted }}>Folders</Text>
               {visibleFolders.map((folder) => (
-                <Pressable className="flex-row items-center justify-between rounded-[18px] bg-[#e9edf1] px-4 py-3" key={folder.id} onPress={() => {
+                <Pressable className="flex-row items-center justify-between rounded-[18px] px-4 py-3" key={folder.id} onPress={() => {
                   if (folder.id !== editingFolderId) setCurrentFolderId(folder.id);
-                }}>
-                  <View className="max-w-[62%] flex-row items-center gap-2">
-                    <Ionicons color="#404040" name="folder-outline" size={20} />
+                }} style={{ backgroundColor: colors.mutedSurface }}>
+                  <View className="min-w-0 grow flex-row items-center gap-2 pr-3">
+                    <Folder color={colors.muted} size={20} />
                     {folder.id === editingFolderId ? (
                       <TextInput
                         autoFocus
-                        className="grow border-b border-neutral-300 py-1 text-base text-neutral-900"
+                        className="grow border-b py-1 text-base"
                         onChangeText={setFolderTitle}
                         onSubmitEditing={() => { void handleSaveFolder(folder); }}
                         placeholder="Folder name"
                         placeholderTextColor="#6b7280"
+                        style={{ borderColor: colors.border, color: colors.text }}
                         value={folderTitle}
                       />
                     ) : (
-                      <Text className="shrink text-base font-semibold text-neutral-900" numberOfLines={1}>{folder.title || 'Untitled folder'}</Text>
+                      <Text className="shrink text-base font-semibold" numberOfLines={1} style={{ color: colors.text }}>{folder.title || 'Untitled folder'}</Text>
                     )}
                   </View>
-                  <Pressable accessibilityLabel={`Move folder ${folder.title}`} className="rounded-xl bg-white px-3 py-2" onPress={() => setPicker({ itemId: folder.id, type: 'folder' })}>
-                    <Text className="text-xs font-semibold text-neutral-800">Move</Text>
-                  </Pressable>
-                  {folder.id === editingFolderId ? (
-                    <Pressable accessibilityLabel="Save folder" className="rounded-xl bg-neutral-900 p-2" onPress={() => { void handleSaveFolder(folder); }}>
-                      <Ionicons color="#ffffff" name="checkmark" size={20} />
+                  <View className="flex-row items-center gap-2">
+                    <Pressable accessibilityLabel={`Move folder ${folder.title}`} className="rounded-xl px-3 py-2" onPress={() => setPicker({ itemId: folder.id, type: 'folder' })} style={{ backgroundColor: colors.surface }}>
+                      <Text className="text-xs font-semibold" style={{ color: colors.text }}>Move</Text>
                     </Pressable>
-                  ) : (
-                    <Pressable accessibilityLabel={`Edit folder ${folder.title}`} className="rounded-xl bg-white p-2" onPress={() => handleStartEditFolder(folder)}>
-                      <Ionicons color="#262626" name="pencil-outline" size={20} />
+                    {folder.id === editingFolderId ? (
+                      <Pressable accessibilityLabel="Save folder" className="rounded-xl p-2" onPress={() => { void handleSaveFolder(folder); }} style={{ backgroundColor: colors.primary }}>
+                        <Check color={colors.primaryText} size={20} />
+                      </Pressable>
+                    ) : (
+                      <Pressable accessibilityLabel={`Edit folder ${folder.title}`} className="rounded-xl p-2" onPress={() => handleStartEditFolder(folder)} style={{ backgroundColor: colors.surface }}>
+                        <Pencil color={colors.text} size={20} />
+                      </Pressable>
+                    )}
+                    <Pressable accessibilityLabel={`Remove folder ${folder.title || 'Untitled folder'}`} className="rounded-xl p-2" onPress={() => { void handleDeleteFolder(folder); }} style={{ backgroundColor: colors.dangerSurface }}>
+                      <Trash2 color={colors.danger} size={20} />
                     </Pressable>
-                  )}
-                  <Pressable accessibilityLabel={`Remove folder ${folder.title || 'Untitled folder'}`} className="rounded-xl bg-red-50 p-2" onPress={() => { void handleDeleteFolder(folder); }}>
-                    <Ionicons color="#c2410c" name="trash-outline" size={20} />
-                  </Pressable>
+                  </View>
                 </Pressable>
               ))}
             </View>
           ) : null}
 
           {visibleCards.length === 0 ? (
-            <Text className="rounded-[24px] bg-white px-5 py-5 text-sm text-neutral-700">
+            <Text className="rounded-[24px] px-5 py-5 text-sm" style={{ backgroundColor: colors.surface, color: colors.muted }}>
               No encrypted cards in this folder yet.
             </Text>
           ) : (
@@ -711,35 +732,37 @@ export function HomeScreen() {
 
               return (
                 <View
-                  className={`rounded-[24px] border bg-white px-5 py-4 ${isEditing ? 'border-neutral-800' : 'border-transparent'}`}
+                  className="rounded-[24px] border px-5 py-4"
                   key={card.id}
+                  style={{ backgroundColor: colors.surface, borderColor: isEditing ? colors.text : colors.surface }}
                 >
                   {isEditing ? (
-                    <View className="flex-row items-center rounded-2xl bg-neutral-100 px-1 py-1">
+                    <View className="flex-row items-center rounded-2xl px-1 py-1" style={{ backgroundColor: colors.mutedSurface }}>
                       <TextInput
                         autoCapitalize="sentences"
                         autoFocus
-                        className="grow px-3 py-3 text-base text-neutral-900"
+                        className="grow px-3 py-3 text-base"
                         onChangeText={setCardQuestion}
                         onSubmitEditing={() => {
                           void handleSaveCard(card.id);
                         }}
                         placeholder="water the plants"
-                        placeholderTextColor="#6b7280"
+                        placeholderTextColor={colors.muted}
                         returnKeyType="done"
                         value={cardQuestion}
+                        style={{ color: colors.text }}
                       />
-                      <View className="mr-2 rounded-full bg-white px-3 py-2">
-                        <Text className="text-lg font-semibold text-neutral-700">?</Text>
+                      <View className="mr-2 rounded-full px-3 py-2" style={{ backgroundColor: colors.surface }}>
+                        <Text className="text-lg font-semibold" style={{ color: colors.muted }}>?</Text>
                       </View>
                     </View>
                   ) : (
-                    <Text className="text-base text-neutral-900">
+                    <Text className="text-base" style={{ color: colors.text }}>
                       {appendQuestionMark(card.question)}
                     </Text>
                   )}
-                    <View className="my-3 h-px bg-neutral-200" />
-                    <Text className="text-lg font-semibold text-neutral-800">
+                    <View className="my-3 h-px" style={{ backgroundColor: colors.border }} />
+                    <Text className="text-lg font-semibold" style={{ color: colors.text }}>
                       {formatElapsedTime(card.lastDoneAt, now)}
                     </Text>
                   <View className="mt-4 flex-row items-center justify-end gap-2">
@@ -747,55 +770,62 @@ export function HomeScreen() {
                       <>
                         <Pressable
                           accessibilityLabel="Save card"
-                          className="rounded-2xl bg-neutral-900 p-3"
+                          className="rounded-2xl p-3"
                           onPress={() => { void handleSaveCard(card.id); }}
+                          style={{ backgroundColor: colors.primary }}
                         >
-                          <Ionicons color="#ffffff" name="checkmark" size={20} />
+                          <Check color={colors.primaryText} size={20} />
                         </Pressable>
                         <Pressable
                           accessibilityLabel="Cancel editing"
-                          className="rounded-2xl bg-neutral-100 p-3"
+                          className="rounded-2xl p-3"
                           onPress={() => handleCancelEdit(card)}
+                          style={{ backgroundColor: colors.mutedSurface }}
                         >
-                          <Ionicons color="#262626" name="close" size={20} />
+                          <X color={colors.text} size={20} />
                         </Pressable>
                       </>
                     ) : (
                       <Pressable
                         accessibilityLabel="Edit card"
-                        className="rounded-2xl bg-neutral-100 p-3"
+                        className="rounded-2xl p-3"
                         onPress={() => handleStartEdit(card)}
+                        style={{ backgroundColor: colors.mutedSurface }}
                       >
-                        <Ionicons color="#262626" name="pencil-outline" size={20} />
+                        <Pencil color={colors.text} size={20} />
                       </Pressable>
                     )}
                     <Pressable
-                      accessibilityLabel="Mark card as done now"
-                      className="rounded-2xl bg-neutral-100 px-4 py-3"
-                      onPress={() => { void handleMarkNow(card.id); }}
-                    >
-                      <Text className="font-semibold text-neutral-800">Now</Text>
-                    </Pressable>
-                    <Pressable
                       accessibilityLabel={`Move card ${card.question || 'Untitled card'}`}
-                      className="rounded-2xl bg-neutral-100 px-3 py-3"
+                      className="rounded-2xl px-3 py-3"
                       onPress={() => setPicker({ itemId: card.id, type: 'card' })}
+                      style={{ backgroundColor: colors.mutedSurface }}
                     >
-                      <Ionicons color="#262626" name="folder-open-outline" size={20} />
+                      <FolderOpen color={colors.text} size={20} />
                     </Pressable>
                     <Pressable
                       accessibilityLabel={`Show history for ${card.question || 'Untitled card'}`}
-                      className="rounded-2xl bg-neutral-100 p-3"
+                      className="rounded-2xl p-3"
                       onPress={() => setHistoryCardId(card.id)}
+                      style={{ backgroundColor: colors.mutedSurface }}
                     >
-                      <Ionicons color="#262626" name="stats-chart-outline" size={20} />
+                      <ChartNoAxesColumnIncreasing color={colors.text} size={20} />
                     </Pressable>
                     <Pressable
                       accessibilityLabel="Remove card"
-                      className="rounded-2xl bg-red-50 p-3"
+                      className="rounded-2xl p-3"
                       onPress={() => { void handleDeleteCard(card.id); }}
+                      style={{ backgroundColor: colors.dangerSurface }}
                     >
-                      <Ionicons color="#c2410c" name="trash-outline" size={20} />
+                      <Trash2 color={colors.danger} size={20} />
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel="Mark card as done now"
+                      className="rounded-2xl px-4 py-3"
+                      onPress={() => { void handleMarkNow(card.id); }}
+                      style={{ backgroundColor: colors.primary }}
+                    >
+                      <Text className="font-semibold" style={{ color: colors.primaryText }}>Now</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -803,17 +833,15 @@ export function HomeScreen() {
             })
           )}
         </View>
-        {statusMessage ? (
-          <Text className="mt-6 text-sm leading-6 text-neutral-700">{statusMessage}</Text>
-        ) : null}
       </ScrollView>
       <Modal animationType="slide" onRequestClose={() => setPicker(null)} transparent visible={picker !== null}>
         <View className="flex-1 justify-end bg-black/30">
-          <View className="max-h-[70%] rounded-t-[28px] bg-white px-5 pb-10 pt-5">
-            <Text className="mb-3 text-lg font-semibold text-neutral-900">Move to folder</Text>
+          <View className="max-h-[70%] rounded-t-[28px] px-5 pb-10 pt-5" style={{ backgroundColor: colors.surface }}>
+            <Text className="mb-3 text-lg font-semibold" style={{ color: colors.text }}>Move to folder</Text>
             <ScrollView>
               <Pressable
-                className="border-b border-neutral-100 py-4"
+                className="border-b py-4"
+                style={{ borderColor: colors.border }}
                 onPress={() => {
                   if (picker?.type === 'card') {
                     const card = cards.find((entry) => entry.id === picker.itemId);
@@ -825,13 +853,14 @@ export function HomeScreen() {
                   setPicker(null);
                 }}
               >
-                <Text className="text-base text-neutral-900">Top level</Text>
+                <Text className="text-base" style={{ color: colors.text }}>Top level</Text>
               </Pressable>
               {sortFolders(folders).filter((folder) => {
                 return picker?.type !== 'folder' || canMoveFolder(picker.itemId, folder.id, folders);
               }).map((folder) => (
                 <Pressable
-                  className="border-b border-neutral-100 py-4"
+                  className="border-b py-4"
+                  style={{ borderColor: colors.border }}
                   key={folder.id}
                   onPress={() => {
                     if (picker?.type === 'card') {
@@ -844,12 +873,12 @@ export function HomeScreen() {
                     setPicker(null);
                   }}
                 >
-                  <Text className="text-base text-neutral-900">{formatFolderLabel(folder, folders)}</Text>
+                  <Text className="text-base" style={{ color: colors.text }}>{formatFolderLabel(folder, folders)}</Text>
                 </Pressable>
               ))}
             </ScrollView>
-            <Pressable className="mt-4 items-center rounded-2xl bg-neutral-100 py-3" onPress={() => setPicker(null)}>
-              <Text className="font-semibold text-neutral-800">Cancel</Text>
+            <Pressable className="mt-4 items-center rounded-2xl py-3" onPress={() => setPicker(null)} style={{ backgroundColor: colors.mutedSurface }}>
+              <Text className="font-semibold" style={{ color: colors.text }}>Cancel</Text>
             </Pressable>
           </View>
         </View>
@@ -860,6 +889,8 @@ export function HomeScreen() {
 }
 
 function HistoryModal({ card, onClose }: { card: DecryptedCard | null; onClose: () => void }) {
+  const { themeMode } = useAppTheme();
+  const colors = homeColors[themeMode];
   const history = card ? [...card.doneAtHistory].sort((left, right) => left.localeCompare(right)) : [];
   const initialView = chooseMobileHistoryView(history);
   const [cutoff, setCutoff] = useState<HistoryCutoff>(initialView.cutoff);
@@ -870,26 +901,26 @@ function HistoryModal({ card, onClose }: { card: DecryptedCard | null; onClose: 
   return (
     <Modal animationType="slide" onRequestClose={onClose} transparent visible={card !== null}>
       <View className="flex-1 justify-end bg-black/30">
-        <View className="rounded-t-[28px] bg-white px-5 pb-10 pt-5">
+        <View className="rounded-t-[28px] px-5 pb-10 pt-5" style={{ backgroundColor: colors.surface }}>
           <View className="flex-row items-start justify-between gap-3">
             <View className="grow">
-              <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-neutral-600">Completion history</Text>
-              <Text className="mt-1 text-lg font-semibold text-neutral-900">{appendQuestionMark(card?.question ?? '')}</Text>
+              <Text className="text-xs font-semibold uppercase tracking-[1.5px]" style={{ color: colors.muted }}>Completion history</Text>
+              <Text className="mt-1 text-lg font-semibold" style={{ color: colors.text }}>{appendQuestionMark(card?.question ?? '')}</Text>
             </View>
-            <Pressable accessibilityLabel="Close history" className="rounded-xl bg-neutral-100 p-2" onPress={onClose}>
-              <Ionicons color="#262626" name="close" size={20} />
+            <Pressable accessibilityLabel="Close history" className="rounded-xl p-2" onPress={onClose} style={{ backgroundColor: colors.mutedSurface }}>
+              <X color={colors.text} size={20} />
             </Pressable>
           </View>
           {history.length === 0 ? (
-            <Text className="mt-6 text-sm text-neutral-600">No completion history yet.</Text>
+            <Text className="mt-6 text-sm" style={{ color: colors.muted }}>No completion history yet.</Text>
           ) : (
             <>
               <Text className="mt-5 text-xs font-semibold uppercase tracking-[1.5px] text-neutral-600">Resolution</Text>
               <ScrollView className="mt-2" horizontal showsHorizontalScrollIndicator={false}>
                 <View className="flex-row gap-2">
                   {historyResolutions.map((entry) => (
-                    <Pressable className={`rounded-xl px-3 py-2 ${resolution === entry.value ? 'bg-neutral-900' : 'bg-neutral-100'}`} key={entry.value} onPress={() => setResolution(entry.value)}>
-                      <Text className={`text-xs font-semibold ${resolution === entry.value ? 'text-white' : 'text-neutral-800'}`}>{entry.label}</Text>
+                    <Pressable className="rounded-xl px-3 py-2" key={entry.value} onPress={() => setResolution(entry.value)} style={{ backgroundColor: resolution === entry.value ? colors.primary : colors.mutedSurface }}>
+                      <Text className="text-xs font-semibold" style={{ color: resolution === entry.value ? colors.primaryText : colors.text }}>{entry.label}</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -898,8 +929,8 @@ function HistoryModal({ card, onClose }: { card: DecryptedCard | null; onClose: 
               <ScrollView className="mt-2" horizontal showsHorizontalScrollIndicator={false}>
                 <View className="flex-row gap-2">
                   {historyCutoffs.map((entry) => (
-                    <Pressable className={`rounded-xl px-3 py-2 ${cutoff === entry.value ? 'bg-neutral-900' : 'bg-neutral-100'}`} key={entry.value} onPress={() => setCutoff(entry.value)}>
-                      <Text className={`text-xs font-semibold ${cutoff === entry.value ? 'text-white' : 'text-neutral-800'}`}>{entry.label}</Text>
+                    <Pressable className="rounded-xl px-3 py-2" key={entry.value} onPress={() => setCutoff(entry.value)} style={{ backgroundColor: cutoff === entry.value ? colors.primary : colors.mutedSurface }}>
+                      <Text className="text-xs font-semibold" style={{ color: cutoff === entry.value ? colors.primaryText : colors.text }}>{entry.label}</Text>
                     </Pressable>
                   ))}
                 </View>
