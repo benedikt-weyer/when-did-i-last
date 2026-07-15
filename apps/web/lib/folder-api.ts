@@ -25,6 +25,14 @@ export async function saveFolder({ baseUrl, folderId, payload, token }: { baseUr
   return readFolderResponse<FolderResponse>(response, 'folder');
 }
 
+export async function deleteFolder({ baseUrl, folderId, token }: { baseUrl: string; folderId: string; token: string }) {
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/folders/${encodeURIComponent(folderId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    method: 'DELETE',
+  });
+  await readFolderResponse<boolean>(response, 'folder deletion');
+}
+
 function normalizeBaseUrl(baseUrl: string) {
   const normalized = baseUrl.trim().replace(/\/+$/, '');
   if (!normalized) throw new Error('Set API_BASE_URL before syncing folders.');

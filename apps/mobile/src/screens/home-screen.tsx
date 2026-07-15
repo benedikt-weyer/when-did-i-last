@@ -13,7 +13,7 @@ import {
   createMobileOfflineNotesSyncAdapter,
   getMobileOfflineNotesProvider,
 } from '../features/e2ee/offline-notes';
-import { fetchFolders, saveFolder } from '../features/e2ee/folder-api';
+import { deleteFolder, fetchFolders, saveFolder } from '../features/e2ee/folder-api';
 import { getNativeAuthModule } from '../features/e2ee/native-runtime';
 import { useAuth } from '../features/auth/auth-context';
 import type { AuthApiResponse } from '../features/auth/auth-api';
@@ -551,6 +551,40 @@ export function HomeScreen() {
     }
   }
 
+  async function handleDeleteFolder(folder: DecryptedFolder) {
+    if (!session || linkedKeks.length === 0 || !activeKekId || !backendUrl.trim()) {
+      setStatusMessage('Connect to the backend before deleting folders.');
+      return;
+    }
+
+    const folderIds = getFolderDescendantIds(folder.id, folders);
+    const cardsToDelete = cards.filter((card) => card.folderId && folderIds.has(card.folderId));
+
+    try {
+      const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
+      for (const card of cardsToDelete) {
+        await mobileOfflineNotesProvider.deleteNote(card.id);
+      }
+      await syncOfflineNotes({ activeLinkedKekId: activeKekId, linkedKeks, nextSession: session });
+
+      const foldersToDelete = folders
+        .filter((entry) => folderIds.has(entry.id))
+        .sort((left, right) => getFolderDepth(right.id, folders) - getFolderDepth(left.id, folders));
+      for (const entry of foldersToDelete) {
+        await runWithFreshSession((activeSession) =>
+          deleteFolder({ baseUrl: backendUrl, folderId: entry.id, token: activeSession.token }),
+        );
+      }
+
+      setFolders((currentFolders) => currentFolders.filter((entry) => !folderIds.has(entry.id)));
+      if (currentFolderId && folderIds.has(currentFolderId)) setCurrentFolderId(folder.parentFolderId);
+      setEditingFolderId(null);
+      setStatusMessage(`Removed folder "${folder.title || 'Untitled folder'}" and its contents.`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'Unable to remove the folder and its contents.');
+    }
+  }
+
   return (
     <View className="flex-1 bg-[#F5EFB9]">
       <StatusBar style="dark" />
@@ -641,6 +675,9 @@ export function HomeScreen() {
                       <Ionicons color="#262626" name="pencil-outline" size={20} />
                     </Pressable>
                   )}
+                  <Pressable accessibilityLabel={`Remove folder ${folder.title || 'Untitled folder'}`} className="rounded-xl bg-red-50 p-2" onPress={() => { void handleDeleteFolder(folder); }}>
+                    <Ionicons color="#c2410c" name="trash-outline" size={20} />
+                  </Pressable>
                 </Pressable>
               ))}
             </View>
@@ -913,6 +950,23 @@ function getFolderBreadcrumbs(folderId: string | null, folders: DecryptedFolder[
   }
 
   return breadcrumbs;
+}
+
+function getFolderDescendantIds(folderId: string, folders: DecryptedFolder[]) {
+  const folderIds = new Set([folderId]);
+  let hasNewDescendants = true;
+
+  while (hasNewDescendants) {
+    hasNewDescendants = false;
+    for (const folder of folders) {
+      if (folder.parentFolderId && folderIds.has(folder.parentFolderId) && !folderIds.has(folder.id)) {
+        folderIds.add(folder.id);
+        hasNewDescendants = true;
+      }
+    }
+  }
+
+  return folderIds;
 }
 
 function getFolderDepth(folderId: string, folders: DecryptedFolder[]) {

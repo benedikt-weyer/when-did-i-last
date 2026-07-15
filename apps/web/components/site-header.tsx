@@ -113,7 +113,7 @@ export function SiteHeader() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/60 bg-background/78 backdrop-blur-xl supports-[backdrop-filter]:bg-background/72">
-      <div className="flex w-full flex-wrap items-center justify-between gap-3 px-6 py-4 sm:px-10 lg:px-12">
+      <div className="grid w-full grid-cols-[1fr_auto] items-center gap-3 px-6 py-4 sm:grid-cols-[1fr_auto_1fr] sm:px-10 lg:px-12">
         <Link className="flex items-center gap-3" href="/">
           <Image
             alt="When Did I Last mark"
@@ -125,8 +125,8 @@ export function SiteHeader() {
           <p className="text-lg font-semibold tracking-tight text-foreground">When Did I Last</p>
         </Link>
 
-        <nav className="order-3 flex w-full items-center justify-between gap-3 sm:order-2 sm:w-auto sm:flex-1 sm:justify-end">
-          <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto rounded-full border border-border/60 bg-card/55 p-1.5 sm:flex-none">
+        <nav className="order-3 col-span-2 flex min-w-0 justify-center sm:order-none sm:col-span-1">
+          <div className="flex min-w-0 items-center gap-2 overflow-x-auto rounded-full border border-border/60 bg-card/55 p-1.5">
             {authLinks.map((item) => (
               <Link
                 key={item.href}
@@ -142,6 +142,9 @@ export function SiteHeader() {
             ))}
           </div>
 
+        </nav>
+
+        <div className="flex shrink-0 items-center justify-self-end gap-2">
           {authLabel ? (
             <div className="flex shrink-0 items-center gap-2">
               <span className="max-w-48 truncate text-sm font-medium text-foreground/80" title={authLabel}>
@@ -168,7 +171,7 @@ export function SiteHeader() {
             )}
             {theme === "dark" ? "Dark" : "Light"}
           </Button>
-        </nav>
+        </div>
       </div>
     </header>
   );

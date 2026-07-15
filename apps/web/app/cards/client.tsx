@@ -17,7 +17,7 @@ import { Check, Folder, FolderPlus, Pencil, Trash2, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { fetchLinkedPrincipals } from '@/lib/auth-api';
-import { fetchFolders, saveFolder } from '@/lib/folder-api';
+import { deleteFolder, fetchFolders, saveFolder } from '@/lib/folder-api';
 
 import {
   PageShell,
@@ -60,6 +60,7 @@ export function CardsPageClient() {
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [folderTitle, setFolderTitle] = useState('');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [moveTarget, setMoveTarget] = useState<{ id: string; type: 'card' | 'folder' } | null>(null);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const selectedCardIdRef = useRef<string | null>(null);
@@ -644,6 +645,62 @@ export function CardsPageClient() {
     }
   }
 
+  async function handleDeleteFolder(folder: DecryptedFolder) {
+    if (!shared.session || shared.linkedKeks.length === 0 || !shared.backendUrl.trim()) {
+      shared.setErrorMessage('Connect to the backend before deleting folders.');
+      return;
+    }
+
+    const folderIds = getFolderDescendantIds(folder.id, folders);
+    const cardsToDelete = cards.filter((card) => card.folderId && folderIds.has(card.folderId));
+
+    try {
+      for (const card of cardsToDelete) {
+        await webOfflineNotesProvider.deleteNote(card.id);
+      }
+
+      const records = toRecords(await syncOfflineNotes({
+        linkedKeks: shared.linkedKeks,
+        nextSession: shared.session,
+        runWithSessionRetry: shared.runWithSessionRetry,
+        trimmedBackendUrl: shared.backendUrl.trim(),
+      }));
+      setCards(sortCards(records.cards));
+
+      const foldersToDelete = folders
+        .filter((entry) => folderIds.has(entry.id))
+        .sort((left, right) => getFolderDepth(right.id, folders) - getFolderDepth(left.id, folders));
+      for (const entry of foldersToDelete) {
+        await shared.runWithSessionRetry(shared.session, shared.backendUrl.trim(), (activeSession) =>
+          deleteFolder({ baseUrl: shared.backendUrl, folderId: entry.id, token: activeSession.token }),
+        );
+      }
+
+      setFolders((currentFolders) => currentFolders.filter((entry) => !folderIds.has(entry.id)));
+      if (currentFolderId && folderIds.has(currentFolderId)) setCurrentFolderId(folder.parentFolderId);
+      setEditingFolderId(null);
+      shared.setStatusMessage(`Removed folder "${folder.title || 'Untitled folder'}" and its contents.`);
+    } catch (error) {
+      shared.setErrorMessage(error instanceof Error ? error.message : 'Unable to remove the folder and its contents.');
+    }
+  }
+
+  async function handleChooseMoveDestination(parentFolderId: string | null) {
+    if (!moveTarget) return;
+
+    const target = moveTarget;
+    setMoveTarget(null);
+
+    if (target.type === 'card') {
+      const card = cards.find((entry) => entry.id === target.id);
+      if (card) await handleMoveCard(card, parentFolderId);
+      return;
+    }
+
+    const folder = folders.find((entry) => entry.id === target.id);
+    if (folder) await handleMoveFolder(folder, parentFolderId);
+  }
+
   return (
     <PageShell title="When did I last...">
       {shared.session ? (
@@ -707,19 +764,8 @@ export function CardsPageClient() {
                         <span className="min-w-0 truncate text-sm font-medium text-foreground">{folder.title || 'Untitled folder'}</span>
                       )}
                     </div>
-                    <select
-                      aria-label={`Move folder ${folder.title}`}
-                      className="rounded-md border border-border bg-background px-2 py-2 text-sm"
-                      onChange={(event) => { void handleMoveFolder(folder, event.target.value || null); }}
-                      onClick={(event) => event.stopPropagation()}
-                      value={folder.parentFolderId ?? ''}
-                    >
-                      <option value="">Top level</option>
-                      {folders.filter((target) => target.id !== folder.id && canMoveFolder(folder.id, target.id, folders)).map((target) => (
-                        <option key={target.id} value={target.id}>{formatFolderLabel(target, folders)}</option>
-                      ))}
-                    </select>
-                    <div className="flex gap-1 sm:col-start-2">
+                    <div className="flex justify-end gap-1 sm:col-start-2">
+                      <Button aria-label={`Move folder ${folder.title || 'Untitled folder'}`} onClick={(event) => { event.stopPropagation(); setMoveTarget({ id: folder.id, type: 'folder' }); }} size="sm" title="Move folder" variant="outline">Move</Button>
                       {folder.id === editingFolderId ? (
                         <>
                           <Button aria-label="Save folder" onClick={(event) => { event.stopPropagation(); void handleSaveFolder(folder); }} size="icon" title="Save folder"><Check /></Button>
@@ -728,6 +774,7 @@ export function CardsPageClient() {
                       ) : (
                         <Button aria-label="Edit folder" onClick={(event) => { event.stopPropagation(); handleStartEditFolder(folder); }} size="icon" title="Edit folder" variant="outline"><Pencil /></Button>
                       )}
+                      <Button aria-label={`Remove folder ${folder.title || 'Untitled folder'}`} onClick={(event) => { event.stopPropagation(); void handleDeleteFolder(folder); }} size="icon" title="Remove folder" variant="ghost"><Trash2 /></Button>
                     </div>
                   </div>
                 ))}
@@ -808,17 +855,7 @@ export function CardsPageClient() {
                         >
                           Now
                         </Button>
-                        <select
-                          aria-label={`Move card ${card.question || 'Untitled card'}`}
-                          className="h-9 max-w-32 rounded-md border border-border bg-background px-2 text-xs"
-                          onChange={(event) => { void handleMoveCard(card, event.target.value || null); }}
-                          value={card.folderId ?? ''}
-                        >
-                          <option value="">Top level</option>
-                          {sortFolders(folders).map((folder) => (
-                            <option key={folder.id} value={folder.id}>{formatFolderLabel(folder, folders)}</option>
-                          ))}
-                        </select>
+                        <Button aria-label={`Move card ${card.question || 'Untitled card'}`} onClick={() => setMoveTarget({ id: card.id, type: 'card' })} size="sm" title="Move card" variant="outline">Move</Button>
                         <Button aria-label="Remove card" onClick={() => { void handleDeleteCard(card.id); }} size="icon" title="Remove card" variant="ghost">
                           <Trash2 />
                         </Button>
@@ -834,6 +871,26 @@ export function CardsPageClient() {
             <p className="rounded-[1.2rem] bg-rose-100 px-4 py-3 text-sm font-medium text-rose-700">
               {shared.errorMessage}
             </p>
+          ) : null}
+
+          {moveTarget ? (
+            <div className="fixed inset-0 z-50 flex items-end bg-black/35 p-4 sm:items-center sm:justify-center" onClick={() => setMoveTarget(null)}>
+              <div aria-modal="true" className="max-h-[75vh] w-full max-w-md overflow-y-auto rounded-lg border border-border bg-card p-4 shadow-xl" onClick={(event) => event.stopPropagation()} role="dialog">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-base font-semibold text-foreground">Move to folder</h2>
+                  <Button aria-label="Close move dialog" onClick={() => setMoveTarget(null)} size="icon" title="Close" variant="ghost"><X /></Button>
+                </div>
+                <div className="mt-3 grid gap-1">
+                  <Button className="justify-start" onClick={() => { void handleChooseMoveDestination(null); }} variant="ghost">Top level</Button>
+                  {sortFolders(folders).filter((folder) => moveTarget.type !== 'folder' || canMoveFolder(moveTarget.id, folder.id, folders)).map((folder) => (
+                    <Button className="justify-start" key={folder.id} onClick={() => { void handleChooseMoveDestination(folder.id); }} variant="ghost">
+                      <Folder className="size-4" />
+                      {formatFolderLabel(folder, folders)}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
           ) : null}
 
         </div>
@@ -972,6 +1029,23 @@ function getFolderBreadcrumbs(folderId: string | null, folders: DecryptedFolder[
   }
 
   return breadcrumbs;
+}
+
+function getFolderDescendantIds(folderId: string, folders: DecryptedFolder[]) {
+  const folderIds = new Set([folderId]);
+  let hasNewDescendants = true;
+
+  while (hasNewDescendants) {
+    hasNewDescendants = false;
+    for (const folder of folders) {
+      if (folder.parentFolderId && folderIds.has(folder.parentFolderId) && !folderIds.has(folder.id)) {
+        folderIds.add(folder.id);
+        hasNewDescendants = true;
+      }
+    }
+  }
+
+  return folderIds;
 }
 
 function getFolderDepth(folderId: string, folders: DecryptedFolder[]) {
