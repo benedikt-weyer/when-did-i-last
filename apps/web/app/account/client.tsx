@@ -27,6 +27,7 @@ import {
   type KekMigrationStatusResponse,
 } from '@/lib/auth-api';
 import { localStorageAuthPersistence } from '@/lib/auth-storage';
+import { fetchFolders } from '@/lib/folder-api';
 import { fetchNotes, updateNote } from '@/lib/test-note-api';
 
 import {
@@ -397,13 +398,13 @@ export function AccountPageClient() {
     },
   ) {
     const trimmedBackendUrl = shared.backendUrl.trim();
-    const remoteNotes = await shared.runWithSessionRetry(nextSession, trimmedBackendUrl, (activeSession) =>
-      fetchNotes({
-        baseUrl: trimmedBackendUrl,
-        token: activeSession.token,
-      }),
+    const [remoteNotes, remoteFolders] = await shared.runWithSessionRetry(nextSession, trimmedBackendUrl, (activeSession) =>
+      Promise.all([
+        fetchNotes({ baseUrl: trimmedBackendUrl, token: activeSession.token }),
+        fetchFolders({ baseUrl: trimmedBackendUrl, token: activeSession.token }),
+      ]),
     );
-    const notesById = new Map(remoteNotes.map((note) => [note.id, note]));
+    const resourcesById = new Map([...remoteNotes, ...remoteFolders].map((resource) => [resource.id, resource]));
 
     setApiUserProgress({
       apiUserId: apiUser.id,
@@ -415,14 +416,17 @@ export function AccountPageClient() {
     let latestApiUser = apiUser;
 
     try {
-      for (const noteId of apiUser.provisioning.pendingCardIds) {
-        const note = notesById.get(noteId);
+      for (const resourceId of [
+        ...apiUser.provisioning.pendingCardIds,
+        ...apiUser.provisioning.pendingFolderIds,
+      ]) {
+        const resource = resourcesById.get(resourceId);
 
-        if (!note) {
-          throw new Error('A card required for api user provisioning is missing from the backend.');
+        if (!resource) {
+          throw new Error('A resource required for api user provisioning is missing from the backend.');
         }
 
-        const noteLinkedKek = findLinkedKek(linkedKeks, note.encryptedDek.kekPublicKey);
+        const noteLinkedKek = findLinkedKek(linkedKeks, resource.encryptedDek.kekPublicKey);
 
         if (!noteLinkedKek) {
           throw new Error(
@@ -437,10 +441,10 @@ export function AccountPageClient() {
             token: activeSession.token,
             wrappedDeks: [
               {
-                resourceId: note.id,
+                resourceId: resource.id,
                 wrappedDek: {
                   ...(await rewrapAsymmetricEncryptedDek(
-                    note,
+                    resource,
                     noteLinkedKek.cryptKey,
                     latestApiUser.latestKekPublicKey,
                   )),

@@ -3,7 +3,7 @@ use axum::{
     http::{header, request::Parts},
 };
 use chrono::Utc;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use sea_orm::{ConnectionTrait, TransactionTrait};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
@@ -14,8 +14,8 @@ use uuid::Uuid;
 use crate::{
     app_state::AppState,
     domains::{
-        auth::{api_user_entity, entity, kek_metadata_entity, repository, PrincipalKind},
-        notes,
+        auth::{PrincipalKind, api_user_entity, entity, kek_metadata_entity, repository},
+        folders, notes,
     },
     error::{AppError, AppResult},
 };
@@ -106,6 +106,7 @@ pub struct LinkedPrincipal {
 pub struct ApiUserProvisioningStatus {
     pub completed_resource_count: u64,
     pub pending_card_ids: Vec<Uuid>,
+    pub pending_folder_ids: Vec<Uuid>,
     pub pending_resource_count: u64,
     pub total_resource_count: u64,
 }
@@ -696,13 +697,20 @@ pub async fn provision_api_user_deks(
             .await?
             .into_iter()
             .collect::<std::collections::HashSet<_>>();
+    let valid_folder_ids =
+        folders::service::list_folder_ids_for_owner(&state.db, authenticated_user.owner_user_id)
+            .await?
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
 
     let wrapped_deks = commands
         .into_iter()
         .map(|command| {
-            if !valid_card_ids.contains(&command.resource_id) {
+            if !valid_card_ids.contains(&command.resource_id)
+                && !valid_folder_ids.contains(&command.resource_id)
+            {
                 return Err(AppError::validation(
-                    "resourceId must reference a card owned by the account",
+                    "resourceId must reference a card or folder owned by the account",
                 ));
             }
 
@@ -786,15 +794,24 @@ async fn build_api_user_record(
             .await?
             .is_some();
     let card_ids = notes::repository::list_note_ids_for_owner(&state.db, api_user.user_id).await?;
+    let folder_ids =
+        folders::service::list_folder_ids_for_owner(&state.db, api_user.user_id).await?;
     let pending_card_ids = notes::repository::list_missing_note_ids_for_principal(
         &state.db,
         api_user.user_id,
         api_user.id,
     )
     .await?;
-    let total_resource_count = card_ids.len() as u64 + 1;
-    let pending_resource_count =
-        pending_card_ids.len() as u64 + if label_provisioned { 0 } else { 1 };
+    let pending_folder_ids = notes::repository::list_missing_resource_ids_for_principal(
+        &state.db,
+        api_user.id,
+        folder_ids.clone(),
+    )
+    .await?;
+    let total_resource_count = (card_ids.len() + folder_ids.len()) as u64 + 1;
+    let pending_resource_count = pending_card_ids.len() as u64
+        + pending_folder_ids.len() as u64
+        + if label_provisioned { 0 } else { 1 };
     let completed_resource_count = total_resource_count.saturating_sub(pending_resource_count);
 
     Ok(ApiUserRecord {
@@ -820,6 +837,7 @@ async fn build_api_user_record(
         provisioning: ApiUserProvisioningStatus {
             completed_resource_count,
             pending_card_ids,
+            pending_folder_ids,
             pending_resource_count,
             total_resource_count,
         },
@@ -1148,7 +1166,7 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
 mod tests {
     use super::*;
     use axum::{
-        body::{to_bytes, Body},
+        body::{Body, to_bytes},
         http::{Request, StatusCode},
         response::IntoResponse,
     };

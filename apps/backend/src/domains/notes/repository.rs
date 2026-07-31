@@ -322,13 +322,24 @@ where
 {
     let note_ids = list_note_ids_for_owner(db, owner_user_id).await?;
 
-    if note_ids.is_empty() {
+    list_missing_resource_ids_for_principal(db, principal_id, note_ids).await
+}
+
+pub async fn list_missing_resource_ids_for_principal<C>(
+    db: &C,
+    principal_id: Uuid,
+    resource_ids: Vec<Uuid>,
+) -> AppResult<Vec<Uuid>>
+where
+    C: ConnectionTrait,
+{
+    if resource_ids.is_empty() {
         return Ok(Vec::new());
     }
 
     let wrapped_resource_ids = dek_entity::Entity::find()
         .filter(dek_entity::Column::UserId.eq(principal_id))
-        .filter(dek_entity::Column::ResourceId.is_in(note_ids.clone()))
+        .filter(dek_entity::Column::ResourceId.is_in(resource_ids.clone()))
         .all(db)
         .await
         .map_err(|_| AppError::internal("failed to query resource deks"))?
@@ -336,9 +347,9 @@ where
         .map(|dek| dek.resource_id)
         .collect::<HashSet<_>>();
 
-    Ok(note_ids
+    Ok(resource_ids
         .into_iter()
-        .filter(|note_id| !wrapped_resource_ids.contains(note_id))
+        .filter(|resource_id| !wrapped_resource_ids.contains(resource_id))
         .collect())
 }
 

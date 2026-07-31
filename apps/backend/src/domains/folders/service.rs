@@ -23,6 +23,18 @@ pub struct StoredFolder {
     pub updated_at: String,
 }
 
+pub async fn list_folder_ids_for_owner<C>(db: &C, owner_user_id: Uuid) -> AppResult<Vec<Uuid>>
+where
+    C: ConnectionTrait,
+{
+    entity::Entity::find()
+        .filter(entity::Column::UserId.eq(owner_user_id))
+        .all(db)
+        .await
+        .map_err(|_| AppError::internal("failed to query folder ids"))
+        .map(|folders| folders.into_iter().map(|folder| folder.id).collect())
+}
+
 pub async fn list_folders(
     state: &AppState,
     user: &AuthenticatedUser,

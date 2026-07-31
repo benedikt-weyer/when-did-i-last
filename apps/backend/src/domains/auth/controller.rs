@@ -1,8 +1,8 @@
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     routing::{delete, get, post},
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::{
     app_state::AppState,
     domains::{
-        auth::{service, AuthenticatedUser, PrincipalKind},
+        auth::{AuthenticatedUser, PrincipalKind, service},
         notes::service as notes_service,
     },
     error::AppResult,
@@ -213,6 +213,7 @@ pub struct WrappedDekResponse {
 pub struct ApiUserProvisioningResponse {
     completed_resource_count: u64,
     pending_card_ids: Vec<Uuid>,
+    pending_folder_ids: Vec<Uuid>,
     pending_resource_count: u64,
     total_resource_count: u64,
 }
@@ -552,6 +553,7 @@ fn map_api_user_response(api_user: service::ApiUserRecord) -> ApiUserResponse {
         provisioning: ApiUserProvisioningResponse {
             completed_resource_count: api_user.provisioning.completed_resource_count,
             pending_card_ids: api_user.provisioning.pending_card_ids,
+            pending_folder_ids: api_user.provisioning.pending_folder_ids,
             pending_resource_count: api_user.provisioning.pending_resource_count,
             total_resource_count: api_user.provisioning.total_resource_count,
         },
