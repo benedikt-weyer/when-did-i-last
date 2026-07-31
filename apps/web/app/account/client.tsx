@@ -430,7 +430,7 @@ export function AccountPageClient() {
 
         if (!noteLinkedKek) {
           throw new Error(
-            `Missing the local KEK for epoch-linked id ${note.encryptedDek.kekPublicKey}. Log in again and provide the older password for that KEK.`,
+            `Missing the local KEK for epoch-linked id ${resource.encryptedDek.kekPublicKey}. Log in again and provide the older password for that KEK.`,
           );
         }
 
