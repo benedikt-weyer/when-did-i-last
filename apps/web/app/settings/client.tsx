@@ -371,7 +371,7 @@ export function SettingsPageClient() {
         const existingNote = notes.find((note) => note.id === importedNote.id) ?? null;
 
         await webOfflineNotesProvider.saveNote({
-          content: normalizeImportedCardContent(importedNote.content),
+          content: importedNote.content,
           id: importedNote.id,
           title: importedNote.title,
         });
@@ -560,16 +560,6 @@ export function SettingsPageClient() {
       )}
     </PageShell>
   );
-}
-
-function normalizeImportedCardContent(value: string) {
-  const trimmedValue = value.trim();
-
-  if (!trimmedValue) {
-    return '';
-  }
-
-  return Number.isNaN(Date.parse(trimmedValue)) ? '' : trimmedValue;
 }
 
 function toBackupFolderNote(folder: {
