@@ -3,6 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.33.4",
   "scripts": {
+    "help": "node ./scripts/help.mjs",
     "dev": "node ./scripts/dev.mjs",
     "devstop": "pnpm db:down",
     "dev:backend": "turbo -F backend dev --ui=tui",

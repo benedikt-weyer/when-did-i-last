@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Wrapper so `help` works directly when scripts/ is on PATH (via direnv).
+set -euo pipefail
+
+exec pnpm run help
