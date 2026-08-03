@@ -27,6 +27,11 @@ export type E2eeHealthResponse = {
   resources: ResourceHealth[];
 };
 
+export type DeletionSummary = {
+  deletedCards: number;
+  deletedFolders: number;
+};
+
 export async function fetchE2eeHealth(request: AuthenticatedHealthApiRequest) {
   const response = await fetch(buildApiUrl(request.baseUrl, '/api/e2ee/health'), {
     headers: {
@@ -49,6 +54,53 @@ export async function fetchE2eeHealth(request: AuthenticatedHealthApiRequest) {
   }
 
   return responseBody;
+}
+
+export async function deleteOrphanedResources(request: AuthenticatedHealthApiRequest) {
+  const response = await fetch(buildApiUrl(request.baseUrl, '/api/e2ee/health/orphaned-resources'), {
+    headers: {
+      Authorization: `Bearer ${request.token}`,
+    },
+    method: 'DELETE',
+  });
+
+  return readDeletionSummaryResponse(response);
+}
+
+export async function deleteUnrepairableResources(request: AuthenticatedHealthApiRequest) {
+  const response = await fetch(
+    buildApiUrl(request.baseUrl, '/api/e2ee/health/unrepairable-resources'),
+    {
+      headers: {
+        Authorization: `Bearer ${request.token}`,
+      },
+      method: 'DELETE',
+    },
+  );
+
+  return readDeletionSummaryResponse(response);
+}
+
+async function readDeletionSummaryResponse(response: Response): Promise<DeletionSummary> {
+  const responseBody = (await response.json().catch(() => null)) as
+    | DeletionSummary
+    | { error?: string }
+    | null;
+
+  if (!response.ok) {
+    throw withResponseStatus(new Error(readErrorMessage(responseBody as { error?: string } | null)), response.status);
+  }
+
+  if (
+    !responseBody ||
+    typeof responseBody !== 'object' ||
+    !('deletedCards' in responseBody) ||
+    !('deletedFolders' in responseBody)
+  ) {
+    throw new Error('The backend did not return a deletion summary.');
+  }
+
+  return responseBody as DeletionSummary;
 }
 
 function isE2eeHealthResponse(value: unknown): value is E2eeHealthResponse {

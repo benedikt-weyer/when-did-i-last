@@ -22,12 +22,61 @@ export type E2eeHealthResponse = {
   resources: ResourceHealth[];
 };
 
+export type DeletionSummary = {
+  deletedCards: number;
+  deletedFolders: number;
+};
+
 export async function fetchE2eeHealth({ baseUrl, token }: { baseUrl: string; token: string }) {
   const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/e2ee/health`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
   return readHealthResponse(response);
+}
+
+export async function deleteOrphanedResources({ baseUrl, token }: { baseUrl: string; token: string }) {
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/e2ee/health/orphaned-resources`, {
+    headers: { Authorization: `Bearer ${token}` },
+    method: 'DELETE',
+  });
+
+  return readDeletionSummaryResponse(response);
+}
+
+export async function deleteUnrepairableResources({ baseUrl, token }: { baseUrl: string; token: string }) {
+  const response = await fetch(`${normalizeBaseUrl(baseUrl)}/api/e2ee/health/unrepairable-resources`, {
+    headers: { Authorization: `Bearer ${token}` },
+    method: 'DELETE',
+  });
+
+  return readDeletionSummaryResponse(response);
+}
+
+async function readDeletionSummaryResponse(response: Response): Promise<DeletionSummary> {
+  const body = (await response.json().catch(() => null)) as
+    | DeletionSummary
+    | { error?: string }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(
+      body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+        ? body.error
+        : 'The backend rejected the deletion request.',
+    );
+  }
+
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    !('deletedCards' in body) ||
+    !('deletedFolders' in body)
+  ) {
+    throw new TypeError('The backend did not return a deletion summary.');
+  }
+
+  return body as DeletionSummary;
 }
 
 async function readHealthResponse(response: Response): Promise<E2eeHealthResponse> {

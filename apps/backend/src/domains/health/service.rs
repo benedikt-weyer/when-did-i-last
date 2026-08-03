@@ -9,6 +9,7 @@ use crate::{
         auth::{self, AuthenticatedUser, service::LinkedPrincipal},
         folders,
         notes::repository as notes_repository,
+        notes::service as notes_service,
     },
     error::AppResult,
 };
@@ -73,6 +74,78 @@ pub async fn get_e2ee_health(
         linked_principals,
         resources,
     })
+}
+
+pub struct DeletionSummary {
+    pub deleted_cards: usize,
+    pub deleted_folders: usize,
+}
+
+/// Deletes every card/folder that has no wrapped DEK for any principal at all
+/// (i.e. is cryptographically unrecoverable by anyone).
+pub async fn delete_orphaned_resources(
+    state: &AppState,
+    authenticated_user: &AuthenticatedUser,
+) -> AppResult<DeletionSummary> {
+    let health = get_e2ee_health(state, authenticated_user).await?;
+
+    delete_resources(
+        state,
+        authenticated_user,
+        health
+            .resources
+            .into_iter()
+            .filter(|resource| resource.recipient_principal_ids.is_empty()),
+    )
+    .await
+}
+
+/// Deletes every card/folder this principal cannot decrypt, whether or not
+/// another linked account or API user still has access to it.
+pub async fn delete_unrepairable_resources(
+    state: &AppState,
+    authenticated_user: &AuthenticatedUser,
+) -> AppResult<DeletionSummary> {
+    let health = get_e2ee_health(state, authenticated_user).await?;
+    let principal_id = authenticated_user.principal_id;
+
+    delete_resources(
+        state,
+        authenticated_user,
+        health
+            .resources
+            .into_iter()
+            .filter(move |resource| !resource.recipient_principal_ids.contains(&principal_id)),
+    )
+    .await
+}
+
+async fn delete_resources(
+    state: &AppState,
+    authenticated_user: &AuthenticatedUser,
+    resources: impl Iterator<Item = ResourceHealth>,
+) -> AppResult<DeletionSummary> {
+    let mut summary = DeletionSummary {
+        deleted_cards: 0,
+        deleted_folders: 0,
+    };
+
+    for resource in resources {
+        match resource.resource_kind {
+            ResourceKind::Card => {
+                notes_service::delete_note(state, authenticated_user, resource.resource_id)
+                    .await?;
+                summary.deleted_cards += 1;
+            }
+            ResourceKind::Folder => {
+                folders::service::delete_folder(state, authenticated_user, resource.resource_id)
+                    .await?;
+                summary.deleted_folders += 1;
+            }
+        }
+    }
+
+    Ok(summary)
 }
 
 async fn build_resource_health(

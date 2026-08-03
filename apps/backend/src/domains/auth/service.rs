@@ -622,11 +622,44 @@ pub async fn delete_api_user(
         .map_err(|_| AppError::internal("failed to start the api user deletion transaction"))?;
 
     delete_api_user_records(&transaction, api_user.id).await?;
+    delete_orphaned_resources_for_owner(&transaction, api_user.user_id).await?;
 
     transaction
         .commit()
         .await
         .map_err(|_| AppError::internal("failed to commit the api user deletion transaction"))?;
+
+    Ok(())
+}
+
+/// Deleting an API user wipes every wrapped DEK it held. Any card or folder
+/// that only had a DEK for this principal is now unrecoverable ciphertext, so
+/// clean it up instead of leaving it orphaned in the database.
+async fn delete_orphaned_resources_for_owner<C>(db: &C, owner_user_id: Uuid) -> AppResult<()>
+where
+    C: ConnectionTrait,
+{
+    let note_ids = notes::repository::list_note_ids_for_owner(db, owner_user_id).await?;
+    let orphaned_note_ids = notes::repository::list_orphaned_resource_ids(db, note_ids).await?;
+
+    for note_id in orphaned_note_ids {
+        if let Some(note) =
+            notes::repository::find_note_entity_by_id(db, owner_user_id, note_id).await?
+        {
+            notes::repository::delete_note(db, note).await?;
+        }
+    }
+
+    let folder_ids = folders::service::list_folder_ids_for_owner(db, owner_user_id).await?;
+    let orphaned_folder_ids = notes::repository::list_orphaned_resource_ids(db, folder_ids).await?;
+
+    for folder_id in orphaned_folder_ids {
+        if let Some(folder) =
+            folders::service::find_folder_entity_by_id(db, owner_user_id, folder_id).await?
+        {
+            folders::service::delete_folder_entity(db, folder).await?;
+        }
+    }
 
     Ok(())
 }

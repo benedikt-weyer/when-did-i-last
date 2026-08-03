@@ -1,4 +1,4 @@
-use axum::{extract::State, routing::get, Json, Router};
+use axum::{extract::State, routing::{delete, get}, Json, Router};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -12,7 +12,13 @@ use crate::{
 };
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/health", get(get_e2ee_health))
+    Router::new()
+        .route("/health", get(get_e2ee_health))
+        .route("/health/orphaned-resources", delete(delete_orphaned_resources))
+        .route(
+            "/health/unrepairable-resources",
+            delete(delete_unrepairable_resources),
+        )
 }
 
 #[derive(Debug, Serialize)]
@@ -39,6 +45,37 @@ pub struct ResourceHealthResponse {
     updated_at: String,
     recipient_principal_ids: Vec<Uuid>,
     missing_principal_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletionSummaryResponse {
+    deleted_cards: usize,
+    deleted_folders: usize,
+}
+
+pub async fn delete_orphaned_resources(
+    State(state): State<AppState>,
+    authenticated_user: AuthenticatedUser,
+) -> AppResult<Json<DeletionSummaryResponse>> {
+    let summary = service::delete_orphaned_resources(&state, &authenticated_user).await?;
+
+    Ok(Json(DeletionSummaryResponse {
+        deleted_cards: summary.deleted_cards,
+        deleted_folders: summary.deleted_folders,
+    }))
+}
+
+pub async fn delete_unrepairable_resources(
+    State(state): State<AppState>,
+    authenticated_user: AuthenticatedUser,
+) -> AppResult<Json<DeletionSummaryResponse>> {
+    let summary = service::delete_unrepairable_resources(&state, &authenticated_user).await?;
+
+    Ok(Json(DeletionSummaryResponse {
+        deleted_cards: summary.deleted_cards,
+        deleted_folders: summary.deleted_folders,
+    }))
 }
 
 pub async fn get_e2ee_health(

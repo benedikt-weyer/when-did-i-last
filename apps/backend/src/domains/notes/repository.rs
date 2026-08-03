@@ -92,6 +92,22 @@ where
         .collect())
 }
 
+pub async fn find_note_entity_by_id<C>(
+    db: &C,
+    owner_user_id: Uuid,
+    note_id: Uuid,
+) -> AppResult<Option<entity::Model>>
+where
+    C: ConnectionTrait,
+{
+    entity::Entity::find()
+        .filter(entity::Column::Id.eq(note_id))
+        .filter(entity::Column::UserId.eq(owner_user_id))
+        .one(db)
+        .await
+        .map_err(|_| AppError::internal("failed to query the note"))
+}
+
 pub async fn find_note_by_id<C>(
     db: &C,
     owner_user_id: Uuid,
@@ -204,15 +220,13 @@ where
     Ok(StoredNote { dek, note })
 }
 
-pub async fn delete_note<C>(db: &C, stored_note: StoredNote) -> AppResult<()>
+pub async fn delete_note<C>(db: &C, note: entity::Model) -> AppResult<()>
 where
     C: ConnectionTrait,
 {
-    delete_wrapped_deks_for_resource(db, stored_note.note.id).await?;
+    delete_wrapped_deks_for_resource(db, note.id).await?;
 
-    stored_note
-        .note
-        .delete(db)
+    note.delete(db)
         .await
         .map_err(|_| AppError::internal("failed to delete the note"))?;
 
@@ -364,6 +378,32 @@ where
     Ok(resource_ids
         .into_iter()
         .filter(|resource_id| !wrapped_resource_ids.contains(resource_id))
+        .collect())
+}
+
+pub async fn list_orphaned_resource_ids<C>(
+    db: &C,
+    resource_ids: Vec<Uuid>,
+) -> AppResult<Vec<Uuid>>
+where
+    C: ConnectionTrait,
+{
+    if resource_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let resource_ids_with_deks = dek_entity::Entity::find()
+        .filter(dek_entity::Column::ResourceId.is_in(resource_ids.clone()))
+        .all(db)
+        .await
+        .map_err(|_| AppError::internal("failed to query resource deks"))?
+        .into_iter()
+        .map(|dek| dek.resource_id)
+        .collect::<HashSet<_>>();
+
+    Ok(resource_ids
+        .into_iter()
+        .filter(|resource_id| !resource_ids_with_deks.contains(resource_id))
         .collect())
 }
 

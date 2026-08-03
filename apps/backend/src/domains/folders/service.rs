@@ -161,6 +161,37 @@ pub async fn delete_folder(
         .map_err(|_| AppError::internal("failed to commit the folder transaction"))
 }
 
+pub async fn find_folder_entity_by_id<C>(
+    db: &C,
+    owner_user_id: Uuid,
+    folder_id: Uuid,
+) -> AppResult<Option<entity::Model>>
+where
+    C: ConnectionTrait,
+{
+    entity::Entity::find()
+        .filter(entity::Column::Id.eq(folder_id))
+        .filter(entity::Column::UserId.eq(owner_user_id))
+        .one(db)
+        .await
+        .map_err(|_| AppError::internal("failed to query the folder"))
+}
+
+pub async fn delete_folder_entity<C>(db: &C, folder: entity::Model) -> AppResult<()>
+where
+    C: ConnectionTrait,
+{
+    repository::delete_wrapped_deks_for_resource(db, folder.id).await?;
+
+    let active: entity::ActiveModel = folder.into();
+    active
+        .delete(db)
+        .await
+        .map_err(|_| AppError::internal("failed to delete the folder"))?;
+
+    Ok(())
+}
+
 pub async fn delete_folders_for_owner<C>(db: &C, owner_user_id: Uuid) -> AppResult<()>
 where
     C: ConnectionTrait,

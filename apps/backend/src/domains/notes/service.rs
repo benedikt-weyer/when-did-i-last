@@ -249,10 +249,9 @@ pub async fn delete_note(
         .begin()
         .await
         .map_err(|_| AppError::internal("failed to start the note transaction"))?;
-    let existing_note = repository::find_note_by_id(
+    let existing_note = repository::find_note_entity_by_id(
         &transaction,
         authenticated_user.owner_user_id,
-        authenticated_user.principal_id,
         note_id,
     )
     .await?

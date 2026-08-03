@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Alert, Pressable, Text, View } from 'react-native';
 
 import { ScreenShell } from '../components/screen-shell';
 import { useAuth } from '../features/auth/auth-context';
@@ -13,7 +13,10 @@ import {
 import { fetchNotes, updateNote } from '../features/e2ee/test-note-api';
 import { getNativeAuthModule } from '../features/e2ee/native-runtime';
 import {
+  deleteOrphanedResources,
+  deleteUnrepairableResources,
   fetchE2eeHealth,
+  type DeletionSummary,
   type E2eeHealthResponse,
   type HealthLinkedPrincipal,
   type ResourceHealth,
@@ -37,6 +40,8 @@ export function E2eeHealthScreen() {
   const [isRepairing, setIsRepairing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [failedRepairs, setFailedRepairs] = useState<FailedRepair[]>([]);
+  const [isDeletingOrphaned, setIsDeletingOrphaned] = useState(false);
+  const [isDeletingUnrepairable, setIsDeletingUnrepairable] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -118,7 +123,9 @@ export function E2eeHealthScreen() {
             const note = notesById.get(resource.resourceId);
 
             if (!note) {
-              throw new Error('The card no longer exists.');
+              throw new Error(
+                'Your account has no wrapped key for this card, so it cannot be decrypted from here. Repair it from a device or account that already has access.',
+              );
             }
 
             const kek = linkedKeks.find((entry) => entry.kekPublicKey === note.encryptedDek.kekPublicKey);
@@ -158,7 +165,9 @@ export function E2eeHealthScreen() {
             const folder = foldersById.get(resource.resourceId);
 
             if (!folder) {
-              throw new Error('The folder no longer exists.');
+              throw new Error(
+                'Your account has no wrapped key for this folder, so it cannot be decrypted from here. Repair it from a device or account that already has access.',
+              );
             }
 
             const kek = linkedKeks.find((entry) => entry.kekPublicKey === folder.encryptedDek.kekPublicKey);
@@ -224,6 +233,90 @@ export function E2eeHealthScreen() {
     }
   }
 
+  async function handleDeleteOrphaned() {
+    if (!session || orphanedResources.length === 0) {
+      return;
+    }
+
+    const confirmed = await confirmDeletion(
+      'Delete orphaned resources',
+      `Permanently delete ${orphanedResources.length} orphaned resource${orphanedResources.length === 1 ? '' : 's'}? No linked account or API user has a key for them, so this cannot be undone.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsDeletingOrphaned(true);
+
+    try {
+      const summary = await runWithFreshSession((activeSession) =>
+        deleteOrphanedResources({ baseUrl: backendUrl, token: activeSession.token }),
+      );
+
+      await loadHealth();
+
+      if (isMountedRef.current) {
+        setFailedRepairs([]);
+        setStatusMessage(buildDeletionSummaryMessage(summary));
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        setStatusMessage(
+          error instanceof Error ? error.message : 'Unable to delete the orphaned resources.',
+        );
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsDeletingOrphaned(false);
+      }
+    }
+  }
+
+  async function handleDeleteUnrepairable() {
+    if (!session || failedRepairs.length === 0) {
+      return;
+    }
+
+    const confirmed = await confirmDeletion(
+      'Delete unrepairable resources',
+      `Permanently delete ${failedRepairs.length} unrepairable resource${failedRepairs.length === 1 ? '' : 's'}? Your account cannot decrypt them, even though another linked account or API user might still have access. This cannot be undone.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsDeletingUnrepairable(true);
+
+    try {
+      const summary = await runWithFreshSession((activeSession) =>
+        deleteUnrepairableResources({ baseUrl: backendUrl, token: activeSession.token }),
+      );
+
+      await loadHealth();
+
+      if (isMountedRef.current) {
+        setFailedRepairs([]);
+        setStatusMessage(buildDeletionSummaryMessage(summary));
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        setStatusMessage(
+          error instanceof Error ? error.message : 'Unable to delete the unrepairable resources.',
+        );
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsDeletingUnrepairable(false);
+      }
+    }
+  }
+
+  const orphanedResources = unhealthyResources.filter(
+    (resource) => resource.recipientPrincipalIds.length === 0,
+  );
+
   return (
     <ScreenShell
       themeMode={themeMode}
@@ -281,6 +374,21 @@ export function E2eeHealthScreen() {
                 : `Repair ${unhealthyResources.length} unhealthy resource${unhealthyResources.length === 1 ? '' : 's'}`}
             </Text>
           </Pressable>
+          {orphanedResources.length > 0 ? (
+            <Pressable
+              className="items-center rounded-full border border-rose-300 px-4 py-4"
+              disabled={isDeletingOrphaned}
+              onPress={() => {
+                void handleDeleteOrphaned();
+              }}
+            >
+              <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-rose-700">
+                {isDeletingOrphaned
+                  ? 'Deleting...'
+                  : `Delete ${orphanedResources.length} orphaned resource${orphanedResources.length === 1 ? '' : 's'}`}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -298,6 +406,19 @@ export function E2eeHealthScreen() {
               tokens={tokens}
             />
           ))}
+          <Pressable
+            className="items-center rounded-full border border-rose-300 px-4 py-4"
+            disabled={isDeletingUnrepairable}
+            onPress={() => {
+              void handleDeleteUnrepairable();
+            }}
+          >
+            <Text className="text-sm font-semibold uppercase tracking-[1.5px] text-rose-700">
+              {isDeletingUnrepairable
+                ? 'Deleting...'
+                : `Delete ${failedRepairs.length} unrepairable resource${failedRepairs.length === 1 ? '' : 's'}`}
+            </Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -345,6 +466,9 @@ function FailedRepairRow({
   const missingPrincipals = resource.missingPrincipalIds.map((principalId) =>
     describePrincipal(linkedPrincipals, principalId),
   );
+  const recipientPrincipals = resource.recipientPrincipalIds.map((principalId) =>
+    describePrincipal(linkedPrincipals, principalId),
+  );
 
   return (
     <View className={`gap-1 rounded-[18px] border border-stone-300 px-4 py-3 dark:border-slate-700`}>
@@ -354,6 +478,10 @@ function FailedRepairRow({
       <Text className="text-xs text-rose-600">{message}</Text>
       <Text className={`text-xs ${tokens.body}`}>
         Missing wrapped DEK for: {missingPrincipals.join(', ')}
+      </Text>
+      <Text className={`text-xs ${tokens.body}`}>
+        Can currently be decrypted by:{' '}
+        {recipientPrincipals.length > 0 ? recipientPrincipals.join(', ') : 'no one currently linked'}
       </Text>
     </View>
   );
@@ -400,6 +528,43 @@ function buildRepairSummaryMessage(repairedCount: number, failedCount: number) {
   }
 
   return `Repair complete: ${segments.join(', ')}.`;
+}
+
+function buildDeletionSummaryMessage(summary: DeletionSummary) {
+  const deletedTotal = summary.deletedCards + summary.deletedFolders;
+
+  if (deletedTotal === 0) {
+    return 'No resources needed to be deleted.';
+  }
+
+  const segments = [];
+
+  if (summary.deletedCards > 0) {
+    segments.push(`${summary.deletedCards} card${summary.deletedCards === 1 ? '' : 's'}`);
+  }
+
+  if (summary.deletedFolders > 0) {
+    segments.push(`${summary.deletedFolders} folder${summary.deletedFolders === 1 ? '' : 's'}`);
+  }
+
+  return `Deleted ${segments.join(' and ')}.`;
+}
+
+function confirmDeletion(title: string, message: string) {
+  return new Promise<boolean>((resolve) => {
+    Alert.alert(title, message, [
+      {
+        style: 'cancel',
+        text: 'Cancel',
+        onPress: () => resolve(false),
+      },
+      {
+        style: 'destructive',
+        text: 'Delete',
+        onPress: () => resolve(true),
+      },
+    ]);
+  });
 }
 
 function parseFolderDocument(value: string) {
