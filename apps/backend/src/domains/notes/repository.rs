@@ -77,17 +77,19 @@ where
         load_deks_for_resources(db, principal_id, notes.iter().map(|note| note.id).collect())
             .await?;
 
-    notes
+    // A note can be missing a wrapped DEK for this principal if it was saved from
+    // another device before this principal was linked. Skip those instead of
+    // failing the whole list: the e2ee health check surfaces them separately, and
+    // failing here would also break the repair flow, which itself lists notes.
+    Ok(notes
         .into_iter()
-        .map(|note| {
-            let dek = deks_by_resource_id
+        .filter_map(|note| {
+            deks_by_resource_id
                 .get(&note.id)
                 .cloned()
-                .ok_or_else(|| AppError::internal("failed to query the resource dek"))?;
-
-            Ok(StoredNote { dek, note })
+                .map(|dek| StoredNote { dek, note })
         })
-        .collect()
+        .collect())
 }
 
 pub async fn find_note_by_id<C>(
