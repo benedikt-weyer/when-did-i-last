@@ -14,6 +14,8 @@ import {
   type ImportExportSuiteInspection,
 } from '@repo/import-export-suite/web';
 
+import Link from 'next/link';
+
 import { Button } from '@/components/ui/button';
 
 import {
@@ -321,6 +323,12 @@ export function SettingsPageClient() {
               <p className="text-sm leading-6 text-foreground/72">
                 Export your current local card set as JSON or import a previous backup into the offline store.
               </p>
+              <Link
+                className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+                href="/settings/e2ee-health"
+              >
+                Check e2ee health &rarr;
+              </Link>
             </div>
           </div>
 

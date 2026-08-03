@@ -300,6 +300,18 @@ where
         .map(|notes| notes.into_iter().map(|note| note.id).collect())
 }
 
+pub async fn list_notes_for_owner<C>(db: &C, owner_user_id: Uuid) -> AppResult<Vec<entity::Model>>
+where
+    C: ConnectionTrait,
+{
+    entity::Entity::find()
+        .filter(entity::Column::UserId.eq(owner_user_id))
+        .order_by_desc(entity::Column::UpdatedAt)
+        .all(db)
+        .await
+        .map_err(|_| AppError::internal("failed to query notes"))
+}
+
 pub async fn list_note_recipient_ids<C>(db: &C, note_id: Uuid) -> AppResult<Vec<Uuid>>
 where
     C: ConnectionTrait,

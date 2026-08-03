@@ -47,6 +47,7 @@ async fn main() -> AppResult<()> {
         .nest("/api/auth", domains::auth::router())
         .nest("/api/cards", domains::notes::router())
         .nest("/api/folders", domains::folders::router())
+        .nest("/api/e2ee", domains::health::router())
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
