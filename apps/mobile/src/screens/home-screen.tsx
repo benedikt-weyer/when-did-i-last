@@ -17,7 +17,7 @@ import {
 import { deleteFolder, fetchFolders, saveFolder } from '../features/e2ee/folder-api';
 import { getNativeAuthModule } from '../features/e2ee/native-runtime';
 import { useAuth } from '../features/auth/auth-context';
-import type { AuthApiResponse } from '../features/auth/auth-api';
+import { fetchLinkedPrincipals, type AuthApiResponse } from '../features/auth/auth-api';
 import { useAppTheme } from '../features/theme/theme-context';
 
 type DecryptedCard = {
@@ -133,7 +133,7 @@ export function HomeScreen() {
     nextSession: AuthApiResponse;
   }) => {
     const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
-    const adapter = createMobileOfflineNotesSyncAdapter({
+    const adapter = await createMobileOfflineNotesSyncAdapter({
       activeKekId: activeLinkedKekId,
       backendUrl,
       linkedKeks,
@@ -494,14 +494,29 @@ export function HomeScreen() {
   }
 
   async function saveEncryptedFolder({ id, parentFolderId, title }: { id?: string; parentFolderId: string | null; title: string }) {
-    if (!session || !activeKekId) throw new Error('Connect to the backend before saving folders.');
-    const { encryptStringWithAsymmetricKek } = await getNativeAuthModule();
-    const kek = linkedKeks.find((entry) => entry.kekPublicKey === activeKekId);
-    if (!kek) throw new Error('Missing the active local KEK for the folder.');
-    const encrypted = await encryptStringWithAsymmetricKek(JSON.stringify({ name: title, parentFolderId, version: 1 }), kek.kekPublicKey);
+    if (!session) throw new Error('Connect to the backend before saving folders.');
+    const { encryptStringWithAsymmetricKeks } = await getNativeAuthModule();
+    const linkedPrincipals = await runWithFreshSession((activeSession) =>
+      fetchLinkedPrincipals({ baseUrl: backendUrl, token: activeSession.token }),
+    );
+    const encrypted = await encryptStringWithAsymmetricKeks(
+      JSON.stringify({ name: title, parentFolderId, version: 1 }),
+      linkedPrincipals.map((principal) => principal.latestKekPublicKey),
+    );
     const saved = await runWithFreshSession((activeSession) => saveFolder({
       baseUrl: backendUrl, folderId: id,
-      payload: { encryptedDeks: [{ ...encrypted.encryptedDek, userId: activeSession.user.id }], encryptedPayload: encrypted.encryptedPayload },
+      payload: {
+        encryptedDeks: encrypted.encryptedDeks.map((encryptedDek, index) => {
+          const principal = linkedPrincipals[index];
+
+          if (!principal) {
+            throw new Error('The backend returned an incomplete linked principal list.');
+          }
+
+          return { ...encryptedDek, userId: principal.id };
+        }),
+        encryptedPayload: encrypted.encryptedPayload,
+      },
       token: activeSession.token,
     }));
     return { createdAt: saved.createdAt, id: saved.id, parentFolderId, title, updatedAt: saved.updatedAt } satisfies DecryptedFolder;

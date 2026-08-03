@@ -14,6 +14,7 @@ import {
 
 import { ScreenShell } from '../components/screen-shell';
 import { useAuth } from '../features/auth/auth-context';
+import { fetchLinkedPrincipals } from '../features/auth/auth-api';
 import {
   createMobileOfflineNotesSyncAdapter,
   getMobileOfflineNotesProvider,
@@ -98,7 +99,7 @@ export function ImportExportScreen() {
     }
 
     const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
-    const adapter = createMobileOfflineNotesSyncAdapter({
+    const adapter = await createMobileOfflineNotesSyncAdapter({
       activeKekId,
       backendUrl,
       linkedKeks,
@@ -280,20 +281,17 @@ export function ImportExportScreen() {
     parentFolderId: string | null,
     existingFolders: DecryptedFolder[],
   ) {
-    if (!session || !activeKekId) {
+    if (!session) {
       throw new Error('Connect to the backend before importing folders.');
     }
 
-    const { encryptStringWithAsymmetricKek } = await getNativeAuthModule();
-    const kek = linkedKeks.find((entry) => entry.kekPublicKey === activeKekId);
-
-    if (!kek) {
-      throw new Error('Missing the active local KEK for the folder.');
-    }
-
-    const encrypted = await encryptStringWithAsymmetricKek(
+    const { encryptStringWithAsymmetricKeks } = await getNativeAuthModule();
+    const linkedPrincipals = await runWithFreshSession((activeSession) =>
+      fetchLinkedPrincipals({ baseUrl: backendUrl, token: activeSession.token }),
+    );
+    const encrypted = await encryptStringWithAsymmetricKeks(
       JSON.stringify({ name: importedNote.title, parentFolderId, version: 1 }),
-      kek.kekPublicKey,
+      linkedPrincipals.map((principal) => principal.latestKekPublicKey),
     );
 
     await runWithFreshSession((activeSession) =>
@@ -301,7 +299,15 @@ export function ImportExportScreen() {
         baseUrl: backendUrl,
         folderId: importedNote.id,
         payload: {
-          encryptedDeks: [{ ...encrypted.encryptedDek, userId: activeSession.user.id }],
+          encryptedDeks: encrypted.encryptedDeks.map((encryptedDek, index) => {
+            const principal = linkedPrincipals[index];
+
+            if (!principal) {
+              throw new Error('The backend returned an incomplete linked principal list.');
+            }
+
+            return { ...encryptedDek, userId: principal.id };
+          }),
           encryptedPayload: encrypted.encryptedPayload,
         },
         token: activeSession.token,

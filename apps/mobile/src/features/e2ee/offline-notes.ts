@@ -6,7 +6,7 @@ import {
   type OfflineNotesSyncAdapter,
 } from '@repo/offline-provider';
 
-import type { AuthApiResponse } from '../auth/auth-api';
+import { fetchLinkedPrincipals, type AuthApiResponse } from '../auth/auth-api';
 import { fetchNotes, updateNote, type NoteResponse, type SaveNotePayload } from './test-note-api';
 import { getNativeAuthModule, getNativeOfflineNotesProviderModule } from './native-runtime';
 
@@ -24,19 +24,21 @@ export async function getMobileOfflineNotesProvider() {
 
 type RunWithFreshSession = <T>(callback: (session: AuthApiResponse) => Promise<T>) => Promise<T>;
 
-export function createMobileOfflineNotesSyncAdapter({
-  activeKekId,
+export async function createMobileOfflineNotesSyncAdapter({
   backendUrl,
   linkedKeks,
   runWithFreshSession,
-  session,
 }: {
   activeKekId: string;
   backendUrl: string;
   linkedKeks: { cryptKey: Uint8Array; kekPublicKey: string }[];
   runWithFreshSession: RunWithFreshSession;
   session: AuthApiResponse;
-}): OfflineNotesSyncAdapter<NoteResponse> {
+}): Promise<OfflineNotesSyncAdapter<NoteResponse>> {
+  const linkedPrincipals = await runWithFreshSession((activeSession) =>
+    fetchLinkedPrincipals({ baseUrl: backendUrl, token: activeSession.token }),
+  );
+
   return {
     async deleteRemoteNote(noteId) {
       await runWithFreshSession(async (activeSession) => {
@@ -82,22 +84,27 @@ export function createMobileOfflineNotesSyncAdapter({
       };
     },
     async upsertRemoteNote(note) {
-      const { encryptStringWithAsymmetricKek } = await getNativeAuthModule();
-      const linkedKek = requireLinkedKek(linkedKeks, activeKekId);
-      const encryptedPayload = await encryptStringWithAsymmetricKek(
+      const { encryptStringWithAsymmetricKeks } = await getNativeAuthModule();
+      const encryptedPayload = await encryptStringWithAsymmetricKeks(
         serializeNoteDocument({
           content: note.content,
           title: note.title,
         }),
-        linkedKek.kekPublicKey,
+        linkedPrincipals.map((principal) => principal.latestKekPublicKey),
       );
       const payload: SaveNotePayload = {
-        encryptedDeks: [
-          {
-            ...encryptedPayload.encryptedDek,
-            userId: session.user.id,
-          },
-        ],
+        encryptedDeks: encryptedPayload.encryptedDeks.map((encryptedDek, index) => {
+          const principal = linkedPrincipals[index];
+
+          if (!principal) {
+            throw new Error('The backend returned an incomplete linked principal list.');
+          }
+
+          return {
+            ...encryptedDek,
+            userId: principal.id,
+          };
+        }),
         encryptedPayload: encryptedPayload.encryptedPayload,
       };
       const savedNote = await runWithFreshSession((activeSession) =>

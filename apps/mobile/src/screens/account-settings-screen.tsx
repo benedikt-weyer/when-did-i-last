@@ -726,7 +726,7 @@ async function syncOfflineNotesFlow({
   runWithFreshSession: <T>(callback: (session: AuthApiResponse) => Promise<T>) => Promise<T>;
 }) {
   const mobileOfflineNotesProvider = await getMobileOfflineNotesProvider();
-  const adapter = createMobileOfflineNotesSyncAdapter({
+  const adapter = await createMobileOfflineNotesSyncAdapter({
     activeKekId: activeLinkedKekId,
     backendUrl,
     linkedKeks,
