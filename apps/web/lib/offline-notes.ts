@@ -127,7 +127,7 @@ export async function createWebOfflineNotesSyncAdapter({
   };
 }
 
-function serializeNoteDocument(note: { content: string; title: string }) {
+export function serializeNoteDocument(note: { content: string; title: string }) {
   const organization = parseNoteOrganization(note.content);
 
   return JSON.stringify({
@@ -141,7 +141,7 @@ function serializeNoteDocument(note: { content: string; title: string }) {
   });
 }
 
-function deserializeNoteDocument(value: string) {
+export function deserializeNoteDocument(value: string) {
   try {
     const parsed = JSON.parse(value) as Partial<{
       content: string;

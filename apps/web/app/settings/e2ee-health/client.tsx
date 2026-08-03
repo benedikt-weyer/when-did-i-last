@@ -2,12 +2,19 @@
 
 import { useEffect, useState } from 'react';
 
+import { decryptStringWithAsymmetricKek, encryptStringWithAsymmetricKeks } from '@repo/e2ee-auth/web';
+
+import { Button } from '@/components/ui/button';
+import { fetchLinkedPrincipals } from '@/lib/auth-api';
+import { fetchFolders, saveFolder } from '@/lib/folder-api';
 import {
   fetchE2eeHealth,
   type E2eeHealthResponse,
   type HealthLinkedPrincipal,
   type ResourceHealth,
 } from '@/lib/health-api';
+import { deserializeNoteDocument, serializeNoteDocument } from '@/lib/offline-notes';
+import { fetchNotes, updateNote } from '@/lib/test-note-api';
 
 import {
   PageShell,
@@ -22,11 +29,13 @@ import { formatTimestamp } from '../../shared/session-page-helpers';
 export function E2eeHealthPageClient() {
   const [health, setHealth] = useState<E2eeHealthResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
 
   const shared = useSessionPageState();
   const {
     backendUrl,
     isHydrated,
+    linkedKeks,
     runWithSessionRetry,
     session,
     setErrorMessage,
@@ -82,6 +91,130 @@ export function E2eeHealthPageClient() {
     };
   }, [backendUrl, isHydrated, runWithSessionRetry, session, setErrorMessage, setStatusMessage]);
 
+  async function handleRepairAll() {
+    if (!session || unhealthyResources.length === 0) {
+      return;
+    }
+
+    const currentSession = session;
+    const trimmedBackendUrl = backendUrl.trim();
+
+    setIsRepairing(true);
+    setErrorMessage(null);
+
+    try {
+      const linkedPrincipals = await runWithSessionRetry(currentSession, trimmedBackendUrl, (activeSession) =>
+        fetchLinkedPrincipals({ baseUrl: trimmedBackendUrl, token: activeSession.token }),
+      );
+      const [remoteNotes, remoteFolders] = await Promise.all([
+        runWithSessionRetry(currentSession, trimmedBackendUrl, (activeSession) =>
+          fetchNotes({ baseUrl: trimmedBackendUrl, token: activeSession.token }),
+        ),
+        runWithSessionRetry(currentSession, trimmedBackendUrl, (activeSession) =>
+          fetchFolders({ baseUrl: trimmedBackendUrl, token: activeSession.token }),
+        ),
+      ]);
+      const notesById = new Map(remoteNotes.map((note) => [note.id, note]));
+      const foldersById = new Map(remoteFolders.map((folder) => [folder.id, folder]));
+
+      let repairedCount = 0;
+      let failedCount = 0;
+
+      for (const resource of unhealthyResources) {
+        try {
+          if (resource.resourceKind === 'card') {
+            const note = notesById.get(resource.resourceId);
+
+            if (!note) {
+              throw new Error('The card no longer exists.');
+            }
+
+            const kek = linkedKeks.find((entry) => entry.kekPublicKey === note.encryptedDek.kekPublicKey);
+
+            if (!kek) {
+              throw new Error('Missing the local key for this card.');
+            }
+
+            const decryptedDocument = deserializeNoteDocument(
+              await decryptStringWithAsymmetricKek(note, kek.cryptKey),
+            );
+            const encrypted = await encryptStringWithAsymmetricKeks(
+              serializeNoteDocument(decryptedDocument),
+              linkedPrincipals.map((principal) => principal.latestKekPublicKey),
+            );
+
+            await runWithSessionRetry(currentSession, trimmedBackendUrl, (activeSession) =>
+              updateNote({
+                baseUrl: trimmedBackendUrl,
+                noteId: note.id,
+                payload: {
+                  encryptedDeks: encrypted.encryptedDeks.map((encryptedDek, index) => ({
+                    ...encryptedDek,
+                    userId: linkedPrincipals[index]!.id,
+                  })),
+                  encryptedPayload: encrypted.encryptedPayload,
+                },
+                token: activeSession.token,
+              }),
+            );
+          } else {
+            const folder = foldersById.get(resource.resourceId);
+
+            if (!folder) {
+              throw new Error('The folder no longer exists.');
+            }
+
+            const kek = linkedKeks.find((entry) => entry.kekPublicKey === folder.encryptedDek.kekPublicKey);
+
+            if (!kek) {
+              throw new Error('Missing the local key for this folder.');
+            }
+
+            const document = parseFolderDocument(
+              await decryptStringWithAsymmetricKek(folder, kek.cryptKey),
+            );
+            const encrypted = await encryptStringWithAsymmetricKeks(
+              JSON.stringify({ name: document.name, parentFolderId: document.parentFolderId, version: 1 }),
+              linkedPrincipals.map((principal) => principal.latestKekPublicKey),
+            );
+
+            await runWithSessionRetry(currentSession, trimmedBackendUrl, (activeSession) =>
+              saveFolder({
+                baseUrl: trimmedBackendUrl,
+                folderId: folder.id,
+                payload: {
+                  encryptedDeks: encrypted.encryptedDeks.map((encryptedDek, index) => ({
+                    ...encryptedDek,
+                    userId: linkedPrincipals[index]!.id,
+                  })),
+                  encryptedPayload: encrypted.encryptedPayload,
+                },
+                token: activeSession.token,
+              }),
+            );
+          }
+
+          repairedCount += 1;
+        } catch {
+          failedCount += 1;
+        }
+      }
+
+      const refreshedHealth = await runWithSessionRetry(currentSession, trimmedBackendUrl, (activeSession) =>
+        fetchE2eeHealth({ baseUrl: trimmedBackendUrl, token: activeSession.token }),
+      );
+
+      setHealth(refreshedHealth);
+      setStatusMessage(buildRepairSummaryMessage(repairedCount, failedCount));
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : 'Unable to repair the unhealthy resources.',
+      );
+    } finally {
+      setIsRepairing(false);
+    }
+  }
+
   const unhealthyResources = health?.resources.filter(
     (resource) => resource.missingPrincipalIds.length > 0,
   ) ?? [];
@@ -103,8 +236,9 @@ export function E2eeHealthPageClient() {
               </p>
               <p className="text-sm leading-6 text-foreground/72">
                 A card or folder is unhealthy when a currently-linked account or API user is
-                missing a wrapped decryption key for it. This can only be detected here, not
-                repaired &mdash; this page is read only.
+                missing a wrapped decryption key for it, usually because it was saved from a
+                device before that principal was linked. Repairing re-encrypts each unhealthy
+                item for every currently-linked account and API user.
               </p>
             </div>
           </div>
@@ -123,6 +257,15 @@ export function E2eeHealthPageClient() {
                   />
                 ))}
               </div>
+              <Button
+                disabled={isRepairing}
+                onClick={() => {
+                  void handleRepairAll();
+                }}
+                size="lg"
+              >
+                {isRepairing ? 'Repairing...' : `Repair ${unhealthyResources.length} unhealthy resource${unhealthyResources.length === 1 ? '' : 's'}`}
+              </Button>
             </div>
           ) : null}
 
@@ -219,4 +362,39 @@ function buildHealthSummaryMessage(health: E2eeHealthResponse) {
   }
 
   return `${unhealthyCount} of ${health.resources.length} cards and folders are missing a wrapped key for a linked account.`;
+}
+
+function buildRepairSummaryMessage(repairedCount: number, failedCount: number) {
+  if (repairedCount === 0 && failedCount === 0) {
+    return 'No resources needed repair.';
+  }
+
+  const segments = [];
+
+  if (repairedCount > 0) {
+    segments.push(`repaired ${repairedCount}`);
+  }
+
+  if (failedCount > 0) {
+    segments.push(`failed to repair ${failedCount}`);
+  }
+
+  return `Repair complete: ${segments.join(', ')}.`;
+}
+
+function parseFolderDocument(value: string) {
+  try {
+    const parsed = JSON.parse(value) as Partial<{ name: unknown; parentFolderId: unknown; version: unknown }>;
+
+    if (parsed.version === 1 && typeof parsed.name === 'string') {
+      return {
+        name: parsed.name,
+        parentFolderId: typeof parsed.parentFolderId === 'string' && parsed.parentFolderId.trim() ? parsed.parentFolderId : null,
+      };
+    }
+  } catch {
+    // The folder payload is authenticated before this fallback is used.
+  }
+
+  throw new Error('The backend returned an invalid encrypted folder.');
 }

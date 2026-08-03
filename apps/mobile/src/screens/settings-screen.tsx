@@ -88,6 +88,16 @@ export function SettingsScreen() {
             Open import / export
           </Text>
         </Pressable>
+        <Pressable
+          className="items-center rounded-full border border-stone-300 px-4 py-4 dark:border-slate-700"
+          onPress={() => {
+            router.push('/e2ee-health');
+          }}
+        >
+          <Text className={`text-sm font-semibold uppercase tracking-[1.5px] ${tokens.title}`}>
+            Check e2ee health
+          </Text>
+        </Pressable>
       </View>
 
       <View className="gap-3">

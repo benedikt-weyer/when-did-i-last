@@ -6,7 +6,7 @@ import {
 
 import type { ThemeMode } from '../features/theme/theme-storage';
 
-type ThemeTokenSet = {
+export type ThemeTokenSet = {
   body: string;
   card: string;
   hero: string;
