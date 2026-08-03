@@ -130,20 +130,33 @@ export function downloadTextFile(filename: string, content: string, mimeType: st
   URL.revokeObjectURL(objectUrl);
 }
 
-export function buildImportSummary(createdCount: number, updatedCount: number) {
+export function buildImportSummary(
+  createdCardCount: number,
+  updatedCardCount: number,
+  createdFolderCount: number,
+  updatedFolderCount: number,
+) {
   const segments = [];
 
-  if (updatedCount > 0) {
-    segments.push(`updated ${updatedCount}`);
+  if (updatedCardCount > 0) {
+    segments.push(`updated ${updatedCardCount} card${updatedCardCount === 1 ? '' : 's'}`);
   }
 
-  if (createdCount > 0) {
-    segments.push(`created ${createdCount}`);
+  if (createdCardCount > 0) {
+    segments.push(`created ${createdCardCount} card${createdCardCount === 1 ? '' : 's'}`);
+  }
+
+  if (updatedFolderCount > 0) {
+    segments.push(`updated ${updatedFolderCount} folder${updatedFolderCount === 1 ? '' : 's'}`);
+  }
+
+  if (createdFolderCount > 0) {
+    segments.push(`created ${createdFolderCount} folder${createdFolderCount === 1 ? '' : 's'}`);
   }
 
   return segments.length > 0
-    ? `Imported cards: ${segments.join(' and ')}.`
-    : 'The import file did not produce any card changes.';
+    ? `Imported: ${segments.join(', ')}.`
+    : 'The import file did not produce any changes.';
 }
 
 export function mergeLinkedKeks(linkedKeks: PersistedLinkedKek[]) {

@@ -12,11 +12,19 @@ import {
   importImportExportSuite,
   inspectImportExportSuite,
   type ImportExportSuiteInspection,
+  type ImportExportSuiteNote,
 } from '@repo/import-export-suite/web';
+import {
+  parseNoteOrganization,
+  serializeFolderOrganization,
+} from '@repo/offline-provider';
+import { decryptStringWithAsymmetricKek, encryptStringWithAsymmetricKeks } from '@repo/e2ee-auth/web';
 
 import Link from 'next/link';
 
 import { Button } from '@/components/ui/button';
+import { fetchLinkedPrincipals } from '@/lib/auth-api';
+import { fetchFolders, saveFolder } from '@/lib/folder-api';
 
 import {
   LabeledInput,
@@ -42,6 +50,14 @@ import {
   toBackupNote,
   type DecryptedNote,
 } from '../shared/session-page-helpers';
+
+type DecryptedFolder = {
+  createdAt: string;
+  id: string;
+  parentFolderId: string | null;
+  title: string;
+  updatedAt: string;
+};
 
 export function SettingsPageClient() {
   const [notes, setNotes] = useState<DecryptedNote[]>([]);
@@ -157,20 +173,96 @@ export function SettingsPageClient() {
     setStatusMessage,
   ]);
 
-  async function handleExportNotes() {
-    if (notes.length === 0) {
-      shared.setStatusMessage('Create or sync at least one card before exporting JSON.');
-      return;
+  async function fetchDecryptedFolders(): Promise<DecryptedFolder[]> {
+    if (!shared.session || shared.linkedKeks.length === 0 || !shared.backendUrl.trim()) {
+      return [];
     }
 
+    const remoteFolders = await shared.runWithSessionRetry(
+      shared.session,
+      shared.backendUrl.trim(),
+      (activeSession) => fetchFolders({ baseUrl: shared.backendUrl, token: activeSession.token }),
+    );
+
+    return Promise.all(
+      remoteFolders.map(async (folder) => {
+        const kek = shared.linkedKeks.find((entry) => entry.kekPublicKey === folder.encryptedDek.kekPublicKey);
+
+        if (!kek) {
+          throw new Error(`Missing the local KEK for folder ${folder.encryptedDek.kekPublicKey}.`);
+        }
+
+        const document = parseFolderDocument(await decryptStringWithAsymmetricKek(folder, kek.cryptKey));
+
+        return {
+          createdAt: folder.createdAt,
+          id: folder.id,
+          parentFolderId: document.parentFolderId,
+          title: document.name,
+          updatedAt: folder.updatedAt,
+        };
+      }),
+    );
+  }
+
+  async function saveImportedFolder(
+    importedNote: ImportExportSuiteNote,
+    parentFolderId: string | null,
+    existingFolders: DecryptedFolder[],
+  ) {
+    if (!shared.session || shared.linkedKeks.length === 0 || !shared.backendUrl.trim()) {
+      throw new Error('Connect to the backend before importing folders.');
+    }
+
+    const principals = await shared.runWithSessionRetry(
+      shared.session,
+      shared.backendUrl.trim(),
+      (activeSession) => fetchLinkedPrincipals({ baseUrl: shared.backendUrl, token: activeSession.token }),
+    );
+    const encrypted = await encryptStringWithAsymmetricKeks(
+      JSON.stringify({ name: importedNote.title, parentFolderId, version: 1 }),
+      principals.map((principal) => principal.latestKekPublicKey),
+    );
+
+    await shared.runWithSessionRetry(
+      shared.session,
+      shared.backendUrl.trim(),
+      (activeSession) => saveFolder({
+        baseUrl: shared.backendUrl,
+        folderId: importedNote.id,
+        payload: {
+          encryptedDeks: encrypted.encryptedDeks.map((dek, index) => ({
+            ...dek,
+            userId: principals[index]!.id,
+          })),
+          encryptedPayload: encrypted.encryptedPayload,
+        },
+        token: activeSession.token,
+      }),
+    );
+
+    return existingFolders.some((folder) => folder.id === importedNote.id);
+  }
+
+  async function handleExportNotes() {
     shared.setErrorMessage(null);
     setIsExportingNotes(true);
 
     try {
-      const cardLabel = `card${notes.length === 1 ? '' : 's'}`;
+      const folders = await fetchDecryptedFolders();
+
+      if (notes.length === 0 && folders.length === 0) {
+        shared.setStatusMessage('Create or sync at least one card or folder before exporting JSON.');
+        return;
+      }
+
+      const backupItems = [
+        ...notes.map((note) => toBackupNote(note)),
+        ...folders.map((folder) => toBackupFolderNote(folder)),
+      ];
       const protectionLabel = exportPassword ? 'password-protected JSON' : 'cleartext JSON';
       const serialized = await exportImportExportSuite(
-        notes.map((note) => toBackupNote(note)),
+        backupItems,
         exportPassword
           ? {
               password: exportPassword,
@@ -181,10 +273,12 @@ export function SettingsPageClient() {
 
       downloadTextFile(filename, serialized, 'application/json');
       setExportPassword('');
-      shared.setStatusMessage(`Exported ${notes.length} ${cardLabel} as ${protectionLabel}.`);
+      shared.setStatusMessage(
+        `Exported ${notes.length} card${notes.length === 1 ? '' : 's'} and ${folders.length} folder${folders.length === 1 ? '' : 's'} as ${protectionLabel}.`,
+      );
     } catch (error) {
       shared.setErrorMessage(
-        error instanceof Error ? error.message : 'Unable to export the cards as JSON.',
+        error instanceof Error ? error.message : 'Unable to export the cards and folders as JSON.',
       );
     } finally {
       setIsExportingNotes(false);
@@ -244,15 +338,36 @@ export function SettingsPageClient() {
       );
 
       if (importedNotes.length === 0) {
-        shared.setStatusMessage('The selected import file does not contain any cards.');
+        shared.setStatusMessage('The selected import file does not contain any cards or folders.');
         return;
       }
 
-      let createdCount = 0;
-      let updatedCount = 0;
+      let createdCardCount = 0;
+      let updatedCardCount = 0;
+      let createdFolderCount = 0;
+      let updatedFolderCount = 0;
       let syncPending = false;
+      const existingFolders = await fetchDecryptedFolders();
 
       for (const importedNote of importedNotes) {
+        const organization = parseNoteOrganization(importedNote.content);
+
+        if (organization.kind === 'folder') {
+          const wasExisting = await saveImportedFolder(
+            importedNote,
+            organization.parentFolderId,
+            existingFolders,
+          );
+
+          if (wasExisting) {
+            updatedFolderCount += 1;
+          } else {
+            createdFolderCount += 1;
+          }
+
+          continue;
+        }
+
         const existingNote = notes.find((note) => note.id === importedNote.id) ?? null;
 
         await webOfflineNotesProvider.saveNote({
@@ -262,9 +377,9 @@ export function SettingsPageClient() {
         });
 
         if (existingNote) {
-          updatedCount += 1;
+          updatedCardCount += 1;
         } else {
-          createdCount += 1;
+          createdCardCount += 1;
         }
       }
 
@@ -294,11 +409,15 @@ export function SettingsPageClient() {
       setImportFileName('');
       setImportInspection(null);
       setImportPassword('');
-      shared.setStatusMessage(
-        syncPending
-          ? `${buildImportSummary(createdCount, updatedCount)} Sync pending.`
-          : buildImportSummary(createdCount, updatedCount),
+
+      const summary = buildImportSummary(
+        createdCardCount,
+        updatedCardCount,
+        createdFolderCount,
+        updatedFolderCount,
       );
+
+      shared.setStatusMessage(syncPending ? `${summary} Sync pending.` : summary);
     } catch (error) {
       shared.setErrorMessage(
         error instanceof Error ? error.message : 'Unable to import the JSON export.',
@@ -346,7 +465,7 @@ export function SettingsPageClient() {
             />
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button
-                disabled={isExportingNotes || notes.length === 0}
+                disabled={isExportingNotes}
                 onClick={() => {
                   void handleExportNotes();
                 }}
@@ -383,7 +502,7 @@ export function SettingsPageClient() {
             <div className="rounded-[1.2rem] border border-border/60 bg-background/80 px-4 py-3 text-sm leading-6 text-foreground/75">
               {importInspection ? (
                 <p>
-                  {importFileName} · {importInspection.noteCount} card{importInspection.noteCount === 1 ? '' : 's'} · {importInspection.encrypted ? 'encrypted' : 'cleartext'}
+                  {importFileName} · {importInspection.noteCount} item{importInspection.noteCount === 1 ? '' : 's'} · {importInspection.encrypted ? 'encrypted' : 'cleartext'}
                 </p>
               ) : (
                 <p>No import file selected.</p>
@@ -451,4 +570,37 @@ function normalizeImportedCardContent(value: string) {
   }
 
   return Number.isNaN(Date.parse(trimmedValue)) ? '' : trimmedValue;
+}
+
+function toBackupFolderNote(folder: {
+  createdAt: string;
+  id: string;
+  parentFolderId: string | null;
+  title: string;
+  updatedAt: string;
+}): ImportExportSuiteNote {
+  return {
+    content: serializeFolderOrganization(folder.parentFolderId),
+    createdAt: folder.createdAt,
+    id: folder.id,
+    title: folder.title,
+    updatedAt: folder.updatedAt,
+  };
+}
+
+function parseFolderDocument(value: string) {
+  try {
+    const parsed = JSON.parse(value) as Partial<{ name: unknown; parentFolderId: unknown; version: unknown }>;
+
+    if (parsed.version === 1 && typeof parsed.name === 'string') {
+      return {
+        name: parsed.name,
+        parentFolderId: typeof parsed.parentFolderId === 'string' && parsed.parentFolderId.trim() ? parsed.parentFolderId : null,
+      };
+    }
+  } catch {
+    // The folder payload is authenticated before this fallback is used.
+  }
+
+  throw new Error('The backend returned an invalid encrypted folder.');
 }
