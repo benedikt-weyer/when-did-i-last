@@ -26,10 +26,16 @@ import {
 } from '../../shared/session-page';
 import { formatTimestamp } from '../../shared/session-page-helpers';
 
+type FailedRepair = {
+  message: string;
+  resource: ResourceHealth;
+};
+
 export function E2eeHealthPageClient() {
   const [health, setHealth] = useState<E2eeHealthResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRepairing, setIsRepairing] = useState(false);
+  const [failedRepairs, setFailedRepairs] = useState<FailedRepair[]>([]);
 
   const shared = useSessionPageState();
   const {
@@ -101,6 +107,7 @@ export function E2eeHealthPageClient() {
 
     setIsRepairing(true);
     setErrorMessage(null);
+    setFailedRepairs([]);
 
     try {
       const linkedPrincipals = await runWithSessionRetry(currentSession, trimmedBackendUrl, (activeSession) =>
@@ -118,7 +125,7 @@ export function E2eeHealthPageClient() {
       const foldersById = new Map(remoteFolders.map((folder) => [folder.id, folder]));
 
       let repairedCount = 0;
-      let failedCount = 0;
+      const failedRepairsForRun: FailedRepair[] = [];
 
       for (const resource of unhealthyResources) {
         try {
@@ -195,8 +202,11 @@ export function E2eeHealthPageClient() {
           }
 
           repairedCount += 1;
-        } catch {
-          failedCount += 1;
+        } catch (error) {
+          failedRepairsForRun.push({
+            message: error instanceof Error ? error.message : 'Unable to repair this resource.',
+            resource,
+          });
         }
       }
 
@@ -205,7 +215,8 @@ export function E2eeHealthPageClient() {
       );
 
       setHealth(refreshedHealth);
-      setStatusMessage(buildRepairSummaryMessage(repairedCount, failedCount));
+      setFailedRepairs(failedRepairsForRun);
+      setStatusMessage(buildRepairSummaryMessage(repairedCount, failedRepairsForRun.length));
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : 'Unable to repair the unhealthy resources.',
@@ -266,6 +277,24 @@ export function E2eeHealthPageClient() {
               >
                 {isRepairing ? 'Repairing...' : `Repair ${unhealthyResources.length} unhealthy resource${unhealthyResources.length === 1 ? '' : 's'}`}
               </Button>
+            </div>
+          ) : null}
+
+          {failedRepairs.length > 0 && health ? (
+            <div className={panelClassName}>
+              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+                Could not repair
+              </p>
+              <div className="grid gap-3">
+                {failedRepairs.map(({ message, resource }) => (
+                  <FailedRepairRow
+                    key={resource.resourceId}
+                    linkedPrincipals={health.linkedPrincipals}
+                    message={message}
+                    resource={resource}
+                  />
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -332,6 +361,33 @@ function UnhealthyResourceRow({
       <p className="text-xs text-foreground/60">
         Last updated {formatTimestamp(resource.updatedAt)}
       </p>
+      <p className="text-sm text-foreground/75">
+        Missing wrapped DEK for: {missingPrincipals.join(', ')}
+      </p>
+    </div>
+  );
+}
+
+function FailedRepairRow({
+  linkedPrincipals,
+  message,
+  resource,
+}: Readonly<{
+  linkedPrincipals: HealthLinkedPrincipal[];
+  message: string;
+  resource: ResourceHealth;
+}>) {
+  const missingPrincipals = resource.missingPrincipalIds.map((principalId) =>
+    describePrincipal(linkedPrincipals, principalId),
+  );
+
+  return (
+    <div className={sectionClassName}>
+      <p className="text-sm font-semibold text-foreground">
+        {resource.resourceKind === 'card' ? 'Card' : 'Folder'}{' '}
+        <span className="font-mono text-xs text-foreground/60">{resource.resourceId}</span>
+      </p>
+      <p className="text-sm text-rose-700">{message}</p>
       <p className="text-sm text-foreground/75">
         Missing wrapped DEK for: {missingPrincipals.join(', ')}
       </p>

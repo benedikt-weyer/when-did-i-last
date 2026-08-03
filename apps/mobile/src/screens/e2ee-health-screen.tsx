@@ -21,6 +21,11 @@ import {
 import { useAppTheme } from '../features/theme/theme-context';
 import { themeTokens, type ThemeTokenSet } from '../theme/theme-tokens';
 
+type FailedRepair = {
+  message: string;
+  resource: ResourceHealth;
+};
+
 export function E2eeHealthScreen() {
   const { activeKekId, backendUrl, linkedKeks, runWithFreshSession, session } = useAuth();
   const { themeMode } = useAppTheme();
@@ -31,6 +36,7 @@ export function E2eeHealthScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isRepairing, setIsRepairing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
+  const [failedRepairs, setFailedRepairs] = useState<FailedRepair[]>([]);
 
   useEffect(() => {
     return () => {
@@ -84,6 +90,7 @@ export function E2eeHealthScreen() {
     }
 
     setIsRepairing(true);
+    setFailedRepairs([]);
 
     try {
       const linkedPrincipals = await runWithFreshSession((activeSession) =>
@@ -103,7 +110,7 @@ export function E2eeHealthScreen() {
         await getNativeAuthModule();
 
       let repairedCount = 0;
-      let failedCount = 0;
+      const failedRepairsForRun: FailedRepair[] = [];
 
       for (const resource of unhealthyResources) {
         try {
@@ -190,15 +197,19 @@ export function E2eeHealthScreen() {
           }
 
           repairedCount += 1;
-        } catch {
-          failedCount += 1;
+        } catch (error) {
+          failedRepairsForRun.push({
+            message: error instanceof Error ? error.message : 'Unable to repair this resource.',
+            resource,
+          });
         }
       }
 
       await loadHealth();
 
       if (isMountedRef.current) {
-        setStatusMessage(buildRepairSummaryMessage(repairedCount, failedCount));
+        setFailedRepairs(failedRepairsForRun);
+        setStatusMessage(buildRepairSummaryMessage(repairedCount, failedRepairsForRun.length));
       }
     } catch (error) {
       if (isMountedRef.current) {
@@ -273,6 +284,23 @@ export function E2eeHealthScreen() {
         </View>
       ) : null}
 
+      {failedRepairs.length > 0 && health ? (
+        <View className="gap-3">
+          <Text className={`text-sm uppercase tracking-[2px] ${tokens.kicker}`}>
+            Could not repair
+          </Text>
+          {failedRepairs.map(({ message, resource }) => (
+            <FailedRepairRow
+              key={resource.resourceId}
+              linkedPrincipals={health.linkedPrincipals}
+              message={message}
+              resource={resource}
+              tokens={tokens}
+            />
+          ))}
+        </View>
+      ) : null}
+
       {statusMessage ? <Text className={`text-sm ${tokens.body}`}>{statusMessage}</Text> : null}
     </ScreenShell>
   );
@@ -296,6 +324,34 @@ function UnhealthyResourceRow({
       <Text className={`text-sm font-semibold ${tokens.title}`}>
         {resource.resourceKind === 'card' ? 'Card' : 'Folder'} {resource.resourceId}
       </Text>
+      <Text className={`text-xs ${tokens.body}`}>
+        Missing wrapped DEK for: {missingPrincipals.join(', ')}
+      </Text>
+    </View>
+  );
+}
+
+function FailedRepairRow({
+  linkedPrincipals,
+  message,
+  resource,
+  tokens,
+}: {
+  linkedPrincipals: HealthLinkedPrincipal[];
+  message: string;
+  resource: ResourceHealth;
+  tokens: ThemeTokenSet;
+}) {
+  const missingPrincipals = resource.missingPrincipalIds.map((principalId) =>
+    describePrincipal(linkedPrincipals, principalId),
+  );
+
+  return (
+    <View className={`gap-1 rounded-[18px] border border-stone-300 px-4 py-3 dark:border-slate-700`}>
+      <Text className={`text-sm font-semibold ${tokens.title}`}>
+        {resource.resourceKind === 'card' ? 'Card' : 'Folder'} {resource.resourceId}
+      </Text>
+      <Text className="text-xs text-rose-600">{message}</Text>
       <Text className={`text-xs ${tokens.body}`}>
         Missing wrapped DEK for: {missingPrincipals.join(', ')}
       </Text>
