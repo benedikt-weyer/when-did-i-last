@@ -67,6 +67,10 @@ struct ErrorBody {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        if self.status.is_server_error() {
+            tracing::error!(status = %self.status, message = %self.message, "request failed with a server error");
+        }
+
         let body = Json(ErrorBody {
             error: self.message,
         });

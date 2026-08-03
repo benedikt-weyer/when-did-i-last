@@ -11,8 +11,11 @@ use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statemen
 use sea_orm_migration::MigratorTrait;
 use tokio::sync::broadcast;
 use tokio::time::sleep;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{info, warn};
+use tower_http::{
+    cors::CorsLayer,
+    trace::{DefaultMakeSpan, TraceLayer},
+};
+use tracing::{info, warn, Level};
 
 use crate::{
     app_state::AppState,
@@ -49,7 +52,15 @@ async fn main() -> AppResult<()> {
         .nest("/api/folders", domains::folders::router())
         .nest("/api/e2ee", domains::health::router())
         .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                // The default span level is DEBUG, which our `tower_http=info`
+                // env filter drops entirely -- taking the method/uri fields
+                // with it, so failures logged inside the span (e.g.
+                // on_failure) show no request context. Raise it to INFO so
+                // every request's method/uri stays visible.
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO)),
+        )
         .with_state(state.clone());
 
     let (listener, bound_addr) = bind_listener(state.config.bind_addr).await?;
