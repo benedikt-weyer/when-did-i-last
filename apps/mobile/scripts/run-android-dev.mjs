@@ -16,6 +16,7 @@ const expoProcess = spawn(expoCommand, ['run:android'], {
   env: {
     ...process.env,
     EXPO_PUBLIC_API_BASE_URL: backendUrl,
+    APP_VARIANT: 'development',
   },
   stdio: 'inherit',
 });
