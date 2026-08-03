@@ -2,7 +2,8 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 
 const DEFAULT_POSTGRES_PORT = 5432;
-const MAX_POSTGRES_PORT = 65_535;
+const DEFAULT_BACKEND_PORT = 4000;
+const MAX_PORT = 65_535;
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -51,20 +52,20 @@ function isPortAvailable(port) {
   });
 }
 
-async function findAvailablePostgresPort() {
-  for (let port = DEFAULT_POSTGRES_PORT; port <= MAX_POSTGRES_PORT; port += 1) {
+async function findAvailablePort(startPort, label) {
+  for (let port = startPort; port <= MAX_PORT; port += 1) {
     if (await isPortAvailable(port)) {
       return port;
     }
   }
 
-  throw new Error('No available TCP port found for Postgres.');
+  throw new Error(`No available TCP port found for ${label}.`);
 }
 
 async function main() {
   await run('docker', ['compose', 'down']);
 
-  const postgresPort = await findAvailablePostgresPort();
+  const postgresPort = await findAvailablePort(DEFAULT_POSTGRES_PORT, 'Postgres');
   const databaseUrl = `postgres://preset:preset@localhost:${postgresPort}/preset`;
   console.log(`Starting Postgres on localhost:${postgresPort}`);
 
@@ -75,10 +76,16 @@ async function main() {
     },
   });
 
+  const backendPort = await findAvailablePort(DEFAULT_BACKEND_PORT, 'the backend');
+  const apiBaseUrl = `http://127.0.0.1:${backendPort}`;
+  console.log(`Starting backend on localhost:${backendPort}`);
+
   await run('turbo', ['dev', '--ui=tui'], {
     env: {
       ...process.env,
       DATABASE_URL: databaseUrl,
+      BACKEND_PORT: String(backendPort),
+      API_BASE_URL: apiBaseUrl,
     },
   });
 }

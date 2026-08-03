@@ -6,7 +6,9 @@
     "ANDROID_NDK_ROOT",
     "JAVA_HOME",
     "GRADLE_OPTS",
-    "DATABASE_URL"
+    "DATABASE_URL",
+    "BACKEND_PORT",
+    "API_BASE_URL"
   ],
   "tasks": {
     "build": {
